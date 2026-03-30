@@ -1,0 +1,11 @@
+# One rule per line.
+# Supports file/folder names, glob patterns, and source-relative paths.
+# Blank lines and lines starting with # or ; are ignored.
+
+node_modules
+target
+*.log
+
+# Examples:
+# sources/dist
+# src/main/resources/*.yaml

@@ -1,0 +1,52 @@
+package cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.controller.admin;
+
+import cn.net.rjnetwork.qixiaozhu.annotation.WebLayer;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.controller.base.WechathlinkBaseController;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkMessageService;
+import cn.net.rjnetwork.qixiaozhu.result.ResultBody;
+import com.zqzqq.bootkits.bootstrap.annotation.ResolveClassLoader;
+import io.swagger.v3.oas.annotations.Operation;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.util.Map;
+
+@RestController
+@RequestMapping("/api/wechathlink/admin/messages")
+public class WechathlinkMessageAdminController extends WechathlinkBaseController {
+
+    private final WechathlinkMessageService messageService;
+
+    public WechathlinkMessageAdminController(WechathlinkMessageService messageService) {
+        this.messageService = messageService;
+    }
+
+    @GetMapping("/peers")
+    @Operation(summary = "Wechat hlink message peers")
+    @WebLayer(name = "Wechat hlink message peers", code = "/api/wechathlink/admin/messages/peers")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> peers(@RequestParam Long wechatAccountId,
+                                                 @RequestParam(required = false) String keyword) {
+        return renderSuccess(messageService.listPeers(wechatAccountId, keyword));
+    }
+
+    @PostMapping("/send-text")
+    @Operation(summary = "Wechat hlink send text")
+    @WebLayer(name = "Wechat hlink send text", code = "/api/wechathlink/admin/messages/send-text")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> sendText(@RequestBody Map<String, Object> body) {
+        return renderSuccess(messageService.sendText(body));
+    }
+
+    @PostMapping("/send-media")
+    @Operation(summary = "Wechat hlink send media")
+    @WebLayer(name = "Wechat hlink send media", code = "/api/wechathlink/admin/messages/send-media")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> sendMedia(@RequestBody Map<String, Object> body) {
+        return renderSuccess(messageService.sendMedia(body));
+    }
+}

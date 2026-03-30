@@ -1,0 +1,25 @@
+{
+  "name": "wechat-hlink-plugins-ui",
+  "version": "0.0.1",
+  "private": true,
+  "scripts": {
+    "dev": "vite --mode development",
+    "dev:test": "vite --mode test",
+    "build": "vite build --mode production",
+    "build:dev": "vite build --mode development",
+    "build:test": "vite build --mode test",
+    "build:prod": "vite build --mode production",
+    "serve": "vite preview --mode production"
+  },
+  "dependencies": {
+    "axios": "^1.13.1",
+    "vue": "^3.4.21",
+    "vue-router": "^4.0.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^4.5.0",
+    "@vue/compiler-sfc": "^3.4.21",
+    "naive-ui": "^2.38.1",
+    "vite": "^4.4.9"
+  }
+}

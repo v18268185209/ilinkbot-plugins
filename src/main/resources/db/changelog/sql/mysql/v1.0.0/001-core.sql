@@ -1,0 +1,140 @@
+CREATE TABLE IF NOT EXISTS wcf_wechat_account (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    account_code VARCHAR(128) NOT NULL,
+    account_name VARCHAR(255) NOT NULL,
+    base_url VARCHAR(512) DEFAULT '',
+    bot_token TEXT,
+    ilink_user_id VARCHAR(255) DEFAULT '',
+    login_status VARCHAR(64) DEFAULT 'CREATED',
+    poll_status VARCHAR(64) DEFAULT 'STOPPED',
+    last_error TEXT,
+    get_updates_buf TEXT,
+    last_poll_at DATETIME NULL,
+    last_inbound_at DATETIME NULL,
+    owner_user_id BIGINT NULL,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1,
+    UNIQUE KEY uk_wcf_wechat_account_code (account_code)
+);
+
+CREATE TABLE IF NOT EXISTS wcf_wechat_account_member (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    wechat_account_id BIGINT NOT NULL,
+    user_id BIGINT NOT NULL,
+    role_code VARCHAR(64) NOT NULL,
+    permission_scope VARCHAR(64) DEFAULT 'FULL',
+    is_primary_owner INT NOT NULL DEFAULT 0,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1,
+    UNIQUE KEY uk_wcf_account_member (wechat_account_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS wcf_peer_context (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    wechat_account_id BIGINT NOT NULL,
+    peer_user_id VARCHAR(255) NOT NULL,
+    context_token VARCHAR(1024) NOT NULL,
+    last_message_at DATETIME NULL,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1,
+    UNIQUE KEY uk_wcf_peer_context (wechat_account_id, peer_user_id)
+);
+
+CREATE TABLE IF NOT EXISTS wcf_login_session (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    session_code VARCHAR(128) NOT NULL,
+    base_url VARCHAR(512) NOT NULL,
+    qr_code_url VARCHAR(1024) NOT NULL,
+    qr_code_content TEXT NOT NULL,
+    session_status VARCHAR(64) NOT NULL,
+    wechat_account_id BIGINT NULL,
+    error_message TEXT,
+    expired_at DATETIME NULL,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1,
+    UNIQUE KEY uk_wcf_login_session_code (session_code)
+);
+
+CREATE TABLE IF NOT EXISTS wcf_event (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    wechat_account_id BIGINT NOT NULL,
+    direction VARCHAR(32) NOT NULL,
+    event_type VARCHAR(64) NOT NULL,
+    from_user_id VARCHAR(255) DEFAULT '',
+    to_user_id VARCHAR(255) DEFAULT '',
+    message_id BIGINT NULL,
+    context_token VARCHAR(1024) DEFAULT '',
+    body_text TEXT,
+    media_path VARCHAR(1024) DEFAULT '',
+    media_file_name VARCHAR(512) DEFAULT '',
+    media_mime_type VARCHAR(255) DEFAULT '',
+    raw_json LONGTEXT,
+    owner_user_id BIGINT NULL,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS wcf_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    wechat_account_id BIGINT NULL,
+    level VARCHAR(32) NOT NULL,
+    message VARCHAR(1024) NOT NULL,
+    source VARCHAR(255) NOT NULL,
+    meta_json LONGTEXT,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS wcf_setting (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    config_group VARCHAR(64) NOT NULL,
+    config_key VARCHAR(128) NOT NULL,
+    config_value LONGTEXT,
+    config_type VARCHAR(64) NOT NULL DEFAULT 'string',
+    is_secret INT NOT NULL DEFAULT 0,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1,
+    UNIQUE KEY uk_wcf_setting_group_key (config_group, config_key, company_id)
+);

@@ -1,0 +1,26 @@
+eqadmin:
+  wechathlink:
+    datasource:
+      mode: auto
+      sqlite:
+        path: ./data/wechathlink.db
+    runtime:
+      listen-addr: 127.0.0.1:17890
+      default-base-url: https://ilinkai.weixin.qq.com
+      cdn-base-url: https://novac2c.cdn.weixin.qq.com/c2c
+      poll-timeout-ms: 35000
+      media-dir: ./data/wechathlink/media
+      webhook-url: ""
+    startup:
+      enabled: true
+      fail-fast: false
+      microapp-sync-enabled: true
+      microapp-create-user-id: 1
+      microapp-enname: wechatHlinkPlugins
+      microapp-zhname: 微信接入
+      microapp-base-url: /childrens/wechathlink/
+      microapp-timeout: 0
+      microapp-iframe: 1
+      microapp-container: iframe
+      microapp-status: 1
+      microapp-schem: https

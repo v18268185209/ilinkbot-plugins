@@ -1,0 +1,6 @@
+eqadmin:
+  wechathlink:
+    datasource:
+      mode: standalone
+      sqlite:
+        path: ./data/wechathlink.db
