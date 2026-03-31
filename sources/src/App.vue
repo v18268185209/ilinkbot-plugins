@@ -1,5 +1,5 @@
 <template>
-  <n-config-provider>
+  <n-config-provider :locale="zhCN" :date-locale="dateZhCN">
     <n-dialog-provider>
       <n-message-provider>
         <n-notification-provider>
@@ -26,6 +26,7 @@
 
 <script setup>
 import { computed } from 'vue'
+import { dateZhCN, zhCN } from 'naive-ui'
 import { useRoute } from 'vue-router'
 import FloatingNav from './components/FloatingNav.vue'
 

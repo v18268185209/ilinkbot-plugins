@@ -45,6 +45,15 @@ const http = axios.create({
   }
 })
 
+function normalizeRequestConfig(data, config = {}) {
+  if (typeof FormData !== 'undefined' && data instanceof FormData) {
+    const headers = { ...(config.headers || {}) }
+    delete headers['Content-Type']
+    return { ...config, headers }
+  }
+  return config
+}
+
 http.interceptors.response.use(
   (response) => {
     const payload = response.data
@@ -75,11 +84,11 @@ export function httpGet(url, config = {}) {
 }
 
 export function httpPost(url, data = {}, config = {}) {
-  return http.post(url, data, config)
+  return http.post(url, data, normalizeRequestConfig(data, config))
 }
 
 export function httpPut(url, data = {}, config = {}) {
-  return http.put(url, data, config)
+  return http.put(url, data, normalizeRequestConfig(data, config))
 }
 
 export function httpDelete(url, config = {}) {

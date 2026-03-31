@@ -13,6 +13,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
@@ -61,11 +62,12 @@ public class WechathlinkOpenApiController {
 
     @GetMapping("/events")
     public Map<String, Object> events(@RequestParam(required = false) Long wechatAccountId,
+                                      @RequestParam(required = false) String contactId,
                                       @RequestParam(required = false) String direction,
                                       @RequestParam(required = false) String eventType,
                                       @RequestParam(required = false) Integer pageNum,
                                       @RequestParam(required = false) Integer pageSize) {
-        return eventService.list(wechatAccountId, direction, eventType, pageNum, pageSize);
+        return eventService.list(wechatAccountId, contactId, direction, eventType, pageNum, pageSize);
     }
 
     @GetMapping("/settings")
@@ -75,8 +77,15 @@ public class WechathlinkOpenApiController {
 
     @GetMapping("/messages/peers")
     public Map<String, Object> peers(@RequestParam Long wechatAccountId,
-                                     @RequestParam(required = false) String keyword) {
-        return messageService.listPeers(wechatAccountId, keyword);
+                                     @RequestParam(required = false) String keyword,
+                                     @RequestParam(required = false) Integer pageNum,
+                                     @RequestParam(required = false) Integer pageSize) {
+        return messageService.listPeers(wechatAccountId, keyword, pageNum, pageSize);
+    }
+
+    @PostMapping(value = "/messages/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public Map<String, Object> upload(@RequestParam("file") MultipartFile file) {
+        return messageService.uploadTempMedia(file);
     }
 
     @PostMapping("/messages/send-text")

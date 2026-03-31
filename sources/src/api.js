@@ -71,9 +71,15 @@ const api = {
     return resolveApiAssetUrl(`/api${adminPrefix}/events/media?eventId=${encodeURIComponent(eventId)}`)
   },
 
-  listMessagePeers(wechatAccountId, keyword) {
+  uploadMessageFile(file) {
+    const formData = new FormData()
+    formData.append('file', file)
+    return httpPost(`${adminPrefix}/messages/upload`, formData)
+  },
+
+  listMessagePeers(params = {}) {
     return httpGet(`${adminPrefix}/messages/peers`, {
-      params: compactParams({ wechatAccountId, keyword })
+      params: compactParams(params)
     })
   },
 

@@ -62,14 +62,10 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                     .or().like(WechathlinkAccount::getAccountName, keyword)
                     .or().like(WechathlinkAccount::getBaseUrl, keyword));
         }
-        Set<Long> accountIds = permissionService.readableAccountIds();
-        if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            if (accountIds.isEmpty()) {
-                return Map.of("list", List.of(), "total", 0L);
-            }
-            wrapper.in(WechathlinkAccount::getId, accountIds);
-        }
         List<WechathlinkAccount> accounts = accountMapper.selectList(wrapper.orderByDesc(WechathlinkAccount::getUpdateTime));
+        if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
+            accounts = accounts.stream().filter(permissionService::canRead).toList();
+        }
         List<Map<String, Object>> rows = accounts.stream().map(this::toView).toList();
         return Map.of("list", rows, "total", (long) rows.size());
     }
@@ -355,6 +351,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         payload.put("accountCode", account.getAccountCode());
         payload.put("accountName", account.getAccountName());
         payload.put("baseUrl", account.getBaseUrl());
+        payload.put("ilinkUserId", account.getIlinkUserId());
         payload.put("loginStatus", account.getLoginStatus());
         payload.put("pollStatus", pollerManager.isRunning(account.getId()) ? "RUNNING" : account.getPollStatus());
         payload.put("lastError", account.getLastError());

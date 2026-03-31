@@ -2,8 +2,10 @@ package cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.impl;
 
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccount;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkEvent;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkPeerContext;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkEventMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkPeerContextMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkEventService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -22,19 +24,21 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
 
     private final WechathlinkAccountMapper accountMapper;
     private final WechathlinkEventMapper eventMapper;
+    private final WechathlinkPeerContextMapper peerContextMapper;
     private final WechathlinkPermissionService permissionService;
 
     public WechathlinkEventServiceImpl(WechathlinkAccountMapper accountMapper,
                                        WechathlinkEventMapper eventMapper,
+                                       WechathlinkPeerContextMapper peerContextMapper,
                                        WechathlinkPermissionService permissionService) {
         this.accountMapper = accountMapper;
         this.eventMapper = eventMapper;
+        this.peerContextMapper = peerContextMapper;
         this.permissionService = permissionService;
     }
 
     @Override
     public Map<String, Object> summary(String keyword, Integer pageNum, Integer pageSize) {
-        Page<WechathlinkAccount> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
         LambdaQueryWrapper<WechathlinkAccount> wrapper = new LambdaQueryWrapper<WechathlinkAccount>()
                 .eq(WechathlinkAccount::getIsDeleted, 0);
         if (StringUtils.hasText(keyword)) {
@@ -42,38 +46,53 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
                     .or().like(WechathlinkAccount::getAccountName, keyword.trim())
                     .or().like(WechathlinkAccount::getBaseUrl, keyword.trim()));
         }
-        Set<Long> accountIds = permissionService.readableAccountIds();
+        List<WechathlinkAccount> accounts = accountMapper.selectList(wrapper.orderByDesc(WechathlinkAccount::getUpdateTime).orderByDesc(WechathlinkAccount::getId));
         if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            if (accountIds.isEmpty()) {
-                return pageResult(List.of(), 0L, page);
-            }
-            wrapper.in(WechathlinkAccount::getId, accountIds);
+            accounts = accounts.stream().filter(permissionService::canRead).toList();
         }
-        wrapper.orderByDesc(WechathlinkAccount::getUpdateTime).orderByDesc(WechathlinkAccount::getId);
-        Page<WechathlinkAccount> result = accountMapper.selectPage(page, wrapper);
-        List<Map<String, Object>> rows = result.getRecords().stream()
+        int pageNumValue = normalizePageNum(pageNum);
+        int pageSizeValue = normalizePageSize(pageSize);
+        int fromIndex = Math.min((pageNumValue - 1) * pageSizeValue, accounts.size());
+        int toIndex = Math.min(fromIndex + pageSizeValue, accounts.size());
+        List<Map<String, Object>> rows = accounts.subList(fromIndex, toIndex).stream()
                 .map(this::toSummaryView)
                 .toList();
-        return pageResult(rows, result.getTotal(), result);
+        return Map.of(
+                "list", rows,
+                "total", (long) accounts.size(),
+                "pageNum", (long) pageNumValue,
+                "pageSize", (long) pageSizeValue
+        );
     }
 
     @Override
-    public Map<String, Object> list(Long wechatAccountId, String direction, String eventType, Integer pageNum, Integer pageSize) {
+    public Map<String, Object> list(Long wechatAccountId, String contactId, String direction, String eventType, Integer pageNum, Integer pageSize) {
+        WechathlinkAccount account = null;
         if (wechatAccountId != null) {
-            requireReadableAccount(wechatAccountId);
+            account = requireReadableAccount(wechatAccountId);
         }
         Page<WechathlinkEvent> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
         LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
                 .eq(WechathlinkEvent::getIsDeleted, 0);
         Set<Long> accountIds = permissionService.readableAccountIds();
         if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            if (accountIds.isEmpty()) {
-                return pageResult(List.of(), 0L, page);
+            if (wechatAccountId == null) {
+                if (accountIds.isEmpty()) {
+                    return pageResult(List.of(), 0L, page);
+                }
+                wrapper.in(WechathlinkEvent::getWechatAccountId, accountIds);
             }
-            wrapper.in(WechathlinkEvent::getWechatAccountId, accountIds);
         }
         if (wechatAccountId != null) {
             wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
+        }
+        if (StringUtils.hasText(contactId)) {
+            String target = contactId.trim();
+            if (account != null && StringUtils.hasText(account.getAccountCode()) && account.getAccountCode().trim().equals(target)) {
+                return pageResult(List.of(), 0L, page);
+            }
+            wrapper.and(w -> w.eq(WechathlinkEvent::getFromUserId, target)
+                    .or().eq(WechathlinkEvent::getToUserId, target));
         }
         if (StringUtils.hasText(direction)) {
             wrapper.eq(WechathlinkEvent::getDirection, direction.trim());
@@ -88,16 +107,21 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
 
     @Override
     public Map<String, Object> contacts(Long wechatAccountId, String keyword, Integer pageNum, Integer pageSize) {
-        requireReadableAccount(wechatAccountId);
+        WechathlinkAccount account = requireReadableAccount(wechatAccountId);
         List<WechathlinkEvent> events = eventMapper.selectList(new LambdaQueryWrapper<WechathlinkEvent>()
                 .eq(WechathlinkEvent::getWechatAccountId, wechatAccountId)
                 .eq(WechathlinkEvent::getIsDeleted, 0)
                 .orderByDesc(WechathlinkEvent::getCreateTime)
                 .orderByDesc(WechathlinkEvent::getId));
+        Map<String, WechathlinkPeerContext> peerContextMap = peerContextMapper.selectList(new LambdaQueryWrapper<WechathlinkPeerContext>()
+                        .eq(WechathlinkPeerContext::getWechatAccountId, wechatAccountId)
+                        .eq(WechathlinkPeerContext::getIsDeleted, 0))
+                .stream()
+                .collect(java.util.stream.Collectors.toMap(WechathlinkPeerContext::getPeerUserId, item -> item, (left, right) -> left, LinkedHashMap::new));
         Map<String, ContactSummary> aggregate = new LinkedHashMap<>();
         for (WechathlinkEvent event : events) {
-            touchContact(aggregate, event.getFromUserId(), true, event.getCreateTime());
-            touchContact(aggregate, event.getToUserId(), false, event.getCreateTime());
+            touchContact(aggregate, account, event.getFromUserId(), true, event);
+            touchContact(aggregate, account, event.getToUserId(), false, event);
         }
         List<Map<String, Object>> rows = aggregate.values().stream()
                 .filter(item -> !StringUtils.hasText(keyword) || item.contactId().contains(keyword.trim()))
@@ -116,7 +140,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
                     int compare = right.compareTo(left);
                     return compare != 0 ? compare : a.contactId().compareTo(b.contactId());
                 })
-                .map(ContactSummary::toView)
+                .map(item -> item.toView(peerContextMap.containsKey(item.contactId())))
                 .toList();
         int page = normalizePageNum(pageNum);
         int size = normalizePageSize(pageSize);
@@ -183,15 +207,20 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
     }
 
     private void touchContact(Map<String, ContactSummary> aggregate,
+                              WechathlinkAccount account,
                               String contactId,
                               boolean sender,
-                              LocalDateTime lastSeenAt) {
+                              WechathlinkEvent event) {
         if (!StringUtils.hasText(contactId)) {
             return;
         }
-        ContactSummary summary = aggregate.get(contactId);
+        String normalized = contactId.trim();
+        if (account != null && StringUtils.hasText(account.getAccountCode()) && account.getAccountCode().trim().equals(normalized)) {
+            return;
+        }
+        ContactSummary summary = aggregate.get(normalized);
         if (summary == null) {
-            summary = new ContactSummary(contactId.trim());
+            summary = new ContactSummary(normalized);
             aggregate.put(summary.contactId(), summary);
         }
         if (sender) {
@@ -199,7 +228,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         } else {
             summary.incrementReceiverCount();
         }
-        summary.touchLastSeenAt(lastSeenAt);
+        summary.touchEvent(event);
     }
 
     private WechathlinkAccount requireReadableAccount(Long wechatAccountId) {
@@ -235,6 +264,9 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         private int senderCount;
         private int receiverCount;
         private LocalDateTime lastSeenAt;
+        private String lastDirection;
+        private String lastEventType;
+        private String lastMessagePreview;
 
         private ContactSummary(String contactId) {
             this.contactId = contactId;
@@ -256,23 +288,60 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
             receiverCount++;
         }
 
-        private void touchLastSeenAt(LocalDateTime value) {
-            if (value == null) {
+        private void touchEvent(WechathlinkEvent event) {
+            if (event == null || event.getCreateTime() == null) {
                 return;
             }
-            if (lastSeenAt == null || value.isAfter(lastSeenAt)) {
-                lastSeenAt = value;
+            if (lastSeenAt == null || event.getCreateTime().isAfter(lastSeenAt)) {
+                lastSeenAt = event.getCreateTime();
+                lastDirection = event.getDirection();
+                lastEventType = event.getEventType();
+                lastMessagePreview = buildPreview(event);
             }
         }
 
-        private Map<String, Object> toView() {
+        private Map<String, Object> toView(boolean hasContextToken) {
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("contactId", contactId);
             payload.put("senderCount", senderCount);
             payload.put("receiverCount", receiverCount);
             payload.put("totalCount", senderCount + receiverCount);
             payload.put("lastSeenAt", lastSeenAt);
+            payload.put("lastDirection", lastDirection);
+            payload.put("lastEventType", lastEventType);
+            payload.put("lastMessagePreview", lastMessagePreview);
+            payload.put("hasContextToken", hasContextToken);
+            payload.put("label", buildLabel());
             return payload;
+        }
+
+        private String buildLabel() {
+            String directionText = switch (StringUtils.hasText(lastDirection) ? lastDirection.trim().toLowerCase() : "") {
+                case "inbound" -> "入站";
+                case "outbound" -> "出站";
+                default -> "";
+            };
+            if (StringUtils.hasText(directionText) && StringUtils.hasText(lastMessagePreview)) {
+                return contactId + " | " + directionText + " | " + lastMessagePreview;
+            }
+            if (StringUtils.hasText(lastMessagePreview)) {
+                return contactId + " | " + lastMessagePreview;
+            }
+            return contactId;
+        }
+
+        private String buildPreview(WechathlinkEvent event) {
+            if (event == null) {
+                return "";
+            }
+            if (StringUtils.hasText(event.getBodyText())) {
+                String text = event.getBodyText().trim();
+                return text.length() > 24 ? text.substring(0, 24) + "..." : text;
+            }
+            if (StringUtils.hasText(event.getMediaFileName())) {
+                return event.getMediaFileName().trim();
+            }
+            return StringUtils.hasText(event.getEventType()) ? event.getEventType().trim() : "";
         }
     }
 }

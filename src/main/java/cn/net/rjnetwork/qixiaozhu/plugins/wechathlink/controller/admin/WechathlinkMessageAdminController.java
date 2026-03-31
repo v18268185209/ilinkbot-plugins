@@ -6,12 +6,14 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkMessage
 import cn.net.rjnetwork.qixiaozhu.result.ResultBody;
 import com.zqzqq.bootkits.bootstrap.annotation.ResolveClassLoader;
 import io.swagger.v3.oas.annotations.Operation;
+import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.Map;
 
@@ -30,8 +32,18 @@ public class WechathlinkMessageAdminController extends WechathlinkBaseController
     @WebLayer(name = "Wechat hlink message peers", code = "/api/wechathlink/admin/messages/peers")
     @ResolveClassLoader
     public ResultBody<Map<String, Object>> peers(@RequestParam Long wechatAccountId,
-                                                 @RequestParam(required = false) String keyword) {
-        return renderSuccess(messageService.listPeers(wechatAccountId, keyword));
+                                                 @RequestParam(required = false) String keyword,
+                                                 @RequestParam(required = false) Integer pageNum,
+                                                 @RequestParam(required = false) Integer pageSize) {
+        return renderSuccess(messageService.listPeers(wechatAccountId, keyword, pageNum, pageSize));
+    }
+
+    @PostMapping(value = "/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "Wechat hlink upload temp media")
+    @WebLayer(name = "Wechat hlink upload temp media", code = "/api/wechathlink/admin/messages/upload")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> upload(@RequestParam("file") MultipartFile file) {
+        return renderSuccess(messageService.uploadTempMedia(file));
     }
 
     @PostMapping("/send-text")

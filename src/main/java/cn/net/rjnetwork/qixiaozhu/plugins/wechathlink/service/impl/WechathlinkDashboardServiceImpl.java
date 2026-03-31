@@ -41,27 +41,21 @@ public class WechathlinkDashboardServiceImpl implements WechathlinkDashboardServ
 
     @Override
     public Map<String, Object> summary() {
-        LambdaQueryWrapper<WechathlinkAccount> accountWrapper = new LambdaQueryWrapper<WechathlinkAccount>()
-                .eq(WechathlinkAccount::getIsDeleted, 0);
-        Set<Long> accountIds = permissionService.readableAccountIds();
+        List<WechathlinkAccount> visibleAccounts = accountMapper.selectList(new LambdaQueryWrapper<WechathlinkAccount>()
+                .eq(WechathlinkAccount::getIsDeleted, 0)
+                .orderByDesc(WechathlinkAccount::getUpdateTime));
         if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            if (accountIds.isEmpty()) {
-                return emptySummary();
-            }
-            accountWrapper.in(WechathlinkAccount::getId, accountIds);
+            visibleAccounts = visibleAccounts.stream().filter(permissionService::canRead).toList();
         }
-        List<WechathlinkAccount> accounts = accountMapper.selectList(accountWrapper.orderByDesc(WechathlinkAccount::getUpdateTime).last("LIMIT 6"));
-        long total = accountMapper.selectCount(accountWrapper);
+        if (visibleAccounts.isEmpty()) {
+            return emptySummary();
+        }
+        Set<Long> accountIds = visibleAccounts.stream().map(WechathlinkAccount::getId).collect(java.util.stream.Collectors.toSet());
+        List<WechathlinkAccount> accounts = visibleAccounts.stream().limit(6).toList();
+        long total = visibleAccounts.size();
         long enabled = accounts.stream().filter(item -> Integer.valueOf(1).equals(item.getStatus())).count();
 
         LocalDateTime startOfDay = LocalDate.now().atStartOfDay();
-        LambdaQueryWrapper<WechathlinkEvent> eventWrapper = new LambdaQueryWrapper<WechathlinkEvent>()
-                .eq(WechathlinkEvent::getIsDeleted, 0)
-                .ge(WechathlinkEvent::getCreateTime, startOfDay);
-        if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            eventWrapper.in(WechathlinkEvent::getWechatAccountId, accountIds);
-        }
-
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("accountCount", total);
         payload.put("enabledAccountCount", enabled);
@@ -70,14 +64,17 @@ public class WechathlinkDashboardServiceImpl implements WechathlinkDashboardServ
         payload.put("outboundTodayCount", countEvents(startOfDay, accountIds, "outbound"));
         payload.put("errorCount", logMapper.selectCount(new LambdaQueryWrapper<WechathlinkLog>()
                 .eq(WechathlinkLog::getIsDeleted, 0)
+                .in(WechathlinkLog::getWechatAccountId, accountIds)
                 .eq(WechathlinkLog::getLevel, "ERROR")));
         payload.put("recentAccounts", accounts);
         payload.put("recentLogs", logMapper.selectList(new LambdaQueryWrapper<WechathlinkLog>()
                 .eq(WechathlinkLog::getIsDeleted, 0)
+                .in(WechathlinkLog::getWechatAccountId, accountIds)
                 .orderByDesc(WechathlinkLog::getCreateTime)
                 .last("LIMIT 6")));
         payload.put("recentEvents", eventMapper.selectList(new LambdaQueryWrapper<WechathlinkEvent>()
                 .eq(WechathlinkEvent::getIsDeleted, 0)
+                .in(WechathlinkEvent::getWechatAccountId, accountIds)
                 .orderByDesc(WechathlinkEvent::getCreateTime)
                 .last("LIMIT 6")));
         return payload;
@@ -98,16 +95,14 @@ public class WechathlinkDashboardServiceImpl implements WechathlinkDashboardServ
     }
 
     private long countEvents(LocalDateTime startOfDay, Set<Long> accountIds, String direction) {
+        if (accountIds == null || accountIds.isEmpty()) {
+            return 0L;
+        }
         LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
                 .eq(WechathlinkEvent::getIsDeleted, 0)
                 .ge(WechathlinkEvent::getCreateTime, startOfDay)
-                .eq(WechathlinkEvent::getDirection, direction);
-        if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            if (accountIds.isEmpty()) {
-                return 0L;
-            }
-            wrapper.in(WechathlinkEvent::getWechatAccountId, accountIds);
-        }
+                .eq(WechathlinkEvent::getDirection, direction)
+                .in(WechathlinkEvent::getWechatAccountId, accountIds);
         return eventMapper.selectCount(wrapper);
     }
 }

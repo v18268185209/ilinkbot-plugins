@@ -12,15 +12,20 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkMessage
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkApi;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkModels;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
+import org.springframework.web.multipart.MultipartFile;
 
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @Service
 public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport implements WechathlinkMessageService {
@@ -50,22 +55,66 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
     }
 
     @Override
-    public Map<String, Object> listPeers(Long wechatAccountId, String keyword) {
+    public Map<String, Object> listPeers(Long wechatAccountId, String keyword, Integer pageNum, Integer pageSize) {
         WechathlinkAccount account = requireOperableAccount(wechatAccountId);
+        Page<WechathlinkPeerContext> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
         LambdaQueryWrapper<WechathlinkPeerContext> wrapper = new LambdaQueryWrapper<WechathlinkPeerContext>()
                 .eq(WechathlinkPeerContext::getWechatAccountId, account.getId())
                 .eq(WechathlinkPeerContext::getIsDeleted, 0);
+        if (StringUtils.hasText(account.getAccountCode())) {
+            wrapper.ne(WechathlinkPeerContext::getPeerUserId, account.getAccountCode().trim());
+        }
         if (StringUtils.hasText(keyword)) {
             wrapper.like(WechathlinkPeerContext::getPeerUserId, keyword.trim());
         }
-        List<Map<String, Object>> rows = peerContextMapper.selectList(
-                        wrapper.orderByDesc(WechathlinkPeerContext::getLastMessageAt)
-                                .orderByDesc(WechathlinkPeerContext::getUpdateTime)
-                                .orderByDesc(WechathlinkPeerContext::getId)
-                ).stream()
+        Page<WechathlinkPeerContext> result = peerContextMapper.selectPage(
+                page,
+                wrapper.orderByDesc(WechathlinkPeerContext::getLastMessageAt)
+                        .orderByDesc(WechathlinkPeerContext::getUpdateTime)
+                        .orderByDesc(WechathlinkPeerContext::getId)
+        );
+        List<Map<String, Object>> rows = result.getRecords().stream()
                 .map(this::toPeerView)
                 .toList();
-        return Map.of("list", rows, "total", (long) rows.size());
+        return Map.of(
+                "list", rows,
+                "total", result.getTotal(),
+                "pageNum", result.getCurrent(),
+                "pageSize", result.getSize()
+        );
+    }
+
+    @Override
+    public Map<String, Object> uploadTempMedia(MultipartFile file) {
+        if (file == null || file.isEmpty()) {
+            throw new IllegalArgumentException("upload file required");
+        }
+        try {
+            var runtime = runtimeConfigService.current();
+            String originalName = file.getOriginalFilename();
+            String fileName = StringUtils.hasText(originalName) ? originalName.trim() : "upload.bin";
+            String safeName = fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+            String datedDir = LocalDateTime.now().toLocalDate().toString();
+            Path baseDir = Path.of(runtime.mediaDir()).toAbsolutePath().normalize().resolve("_uploads").resolve(datedDir);
+            Files.createDirectories(baseDir);
+            Path target = baseDir.resolve(UUID.randomUUID().toString().replace("-", "") + "_" + safeName).normalize();
+            try (var in = file.getInputStream()) {
+                Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+            }
+            String contentType = file.getContentType();
+            if (!StringUtils.hasText(contentType)) {
+                contentType = Files.probeContentType(target);
+            }
+            return Map.of(
+                    "filePath", target.toString(),
+                    "fileName", fileName,
+                    "size", file.getSize(),
+                    "mimeType", contentType == null ? "application/octet-stream" : contentType,
+                    "detectedType", detectMediaType(fileName)
+            );
+        } catch (Exception ex) {
+            throw new IllegalStateException("upload temp media failed: " + ex.getMessage(), ex);
+        }
     }
 
     @Override
@@ -245,17 +294,32 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
         String lastMessagePreview = latestEvent == null ? "" : buildEventPreview(latestEvent);
         String lastDirection = latestEvent == null ? "" : defaultValue(latestEvent.getDirection(), "");
         String lastEventType = latestEvent == null ? "" : defaultValue(latestEvent.getEventType(), "");
+        long totalCount = countConversationEvents(peerContext.getWechatAccountId(), peerContext.getPeerUserId());
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("id", peerContext.getId());
         payload.put("wechatAccountId", peerContext.getWechatAccountId());
         payload.put("peerUserId", peerContext.getPeerUserId());
+        payload.put("contactId", peerContext.getPeerUserId());
         payload.put("lastMessageAt", peerContext.getLastMessageAt());
+        payload.put("lastSeenAt", peerContext.getLastMessageAt());
         payload.put("hasContextToken", StringUtils.hasText(peerContext.getContextToken()));
         payload.put("lastDirection", lastDirection);
         payload.put("lastEventType", lastEventType);
         payload.put("lastMessagePreview", lastMessagePreview);
+        payload.put("totalCount", totalCount);
         payload.put("label", buildPeerLabel(peerContext.getPeerUserId(), lastDirection, lastMessagePreview));
         return payload;
+    }
+
+    private long countConversationEvents(Long wechatAccountId, String peerUserId) {
+        if (wechatAccountId == null || !StringUtils.hasText(peerUserId)) {
+            return 0L;
+        }
+        return eventMapper.selectCount(new LambdaQueryWrapper<WechathlinkEvent>()
+                .eq(WechathlinkEvent::getWechatAccountId, wechatAccountId)
+                .and(w -> w.eq(WechathlinkEvent::getFromUserId, peerUserId)
+                        .or().eq(WechathlinkEvent::getToUserId, peerUserId))
+                .eq(WechathlinkEvent::getIsDeleted, 0));
     }
 
     private WechathlinkEvent findLatestEvent(Long wechatAccountId, String peerUserId) {
@@ -310,6 +374,17 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
             throw new IllegalArgumentException("wechat account not found or no permission");
         }
         return account;
+    }
+
+    private int normalizePageNum(Integer pageNum) {
+        return pageNum == null || pageNum < 1 ? 1 : pageNum;
+    }
+
+    private int normalizePageSize(Integer pageSize) {
+        if (pageSize == null || pageSize < 1) {
+            return 10;
+        }
+        return Math.min(pageSize, 100);
     }
 
     private void createLog(Long accountId, String level, String message, String source, String metaJson) {

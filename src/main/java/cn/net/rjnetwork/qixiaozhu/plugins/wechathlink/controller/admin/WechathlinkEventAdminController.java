@@ -48,11 +48,12 @@ public class WechathlinkEventAdminController extends WechathlinkBaseController {
     @WebLayer(name = "Wechat hlink event list", code = "/api/wechathlink/admin/events/list")
     @ResolveClassLoader
     public ResultBody<Map<String, Object>> list(@RequestParam(required = false) Long wechatAccountId,
+                                                @RequestParam(required = false) String contactId,
                                                 @RequestParam(required = false) String direction,
                                                 @RequestParam(required = false) String eventType,
                                                 @RequestParam(required = false) Integer pageNum,
                                                 @RequestParam(required = false) Integer pageSize) {
-        return renderSuccess(eventService.list(wechatAccountId, direction, eventType, pageNum, pageSize));
+        return renderSuccess(eventService.list(wechatAccountId, contactId, direction, eventType, pageNum, pageSize));
     }
 
     @GetMapping("/contacts")
