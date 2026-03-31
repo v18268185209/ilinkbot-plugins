@@ -29,18 +29,21 @@ import { computed } from 'vue'
 import { dateZhCN, zhCN } from 'naive-ui'
 import { useRoute } from 'vue-router'
 import FloatingNav from './components/FloatingNav.vue'
+import { hasPermission } from './utils/permission'
 
 const route = useRoute()
 
 const navItems = [
-  { label: '工作台', path: '/overview' },
-  { label: '微信账号', path: '/accounts' },
-  { label: '事件中心', path: '/events' },
-  { label: '消息发送', path: '/messages' },
-  { label: '设置', path: '/settings' }
+  { label: '工作台', path: '/overview', permission: '/dashboard/plugins/wechathlink/overview' },
+  { label: '微信账号', path: '/accounts', permission: '/dashboard/plugins/wechathlink/accounts' },
+  { label: '事件中心', path: '/events', permission: '/dashboard/plugins/wechathlink/events' },
+  { label: '消息发送', path: '/messages', permission: '/dashboard/plugins/wechathlink/messages' },
+  { label: '审计中心', path: '/audits', permission: '/dashboard/plugins/wechathlink/audits' },
+  { label: '设置', path: '/settings', permission: '/dashboard/plugins/wechathlink/settings' }
 ]
 
-const currentNav = computed(() => navItems.find((item) => route.path.startsWith(item.path)))
+const visibleNavItems = computed(() => navItems.filter((item) => hasPermission(item.permission)))
+const currentNav = computed(() => visibleNavItems.value.find((item) => route.path.startsWith(item.path)) || navItems.find((item) => route.path.startsWith(item.path)))
 </script>
 
 <style>

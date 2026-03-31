@@ -9,8 +9,8 @@
         </div>
 
         <div class="events-overview__actions">
-          <n-button @click="clearEventFilters">清空筛选</n-button>
-          <n-button type="primary" @click="refreshWorkspace">刷新事件</n-button>
+          <n-button v-permission="'/api/wechathlink/admin/events/list'" @click="clearEventFilters">清空筛选</n-button>
+          <n-button v-permission="'/api/wechathlink/admin/events/summary'" type="primary" @click="refreshWorkspace">刷新事件</n-button>
         </div>
 
         <div class="events-kpis">
@@ -54,7 +54,7 @@
                 placeholder="按微信号 / 名称 / 地址搜索"
                 @keyup.enter="applySummarySearch"
               />
-              <n-button @click="applySummarySearch">查询</n-button>
+              <n-button v-permission="'/api/wechathlink/admin/events/summary'" @click="applySummarySearch">查询</n-button>
             </div>
 
             <div v-if="summaryRows.length" class="account-list">
@@ -141,6 +141,12 @@
                 placeholder="联系人ID"
                 @keyup.enter="applyDetailSearch"
               />
+              <n-input
+                v-model:value="detailFilters.keyword"
+                clearable
+                placeholder="关键词 / 文件名 / 用户ID"
+                @keyup.enter="applyDetailSearch"
+              />
               <n-select
                 v-model:value="detailFilters.direction"
                 :options="directionOptions"
@@ -153,7 +159,21 @@
                 clearable
                 placeholder="事件类型"
               />
-              <n-button @click="applyDetailSearch">查询</n-button>
+              <n-select
+                v-model:value="detailFilters.hasMedia"
+                :options="hasMediaOptions"
+                clearable
+                placeholder="媒体筛选"
+              />
+              <n-date-picker
+                v-model:value="detailFilters.dateRange"
+                type="daterange"
+                clearable
+                start-placeholder="开始日期"
+                end-placeholder="结束日期"
+              />
+              <n-button v-permission="'/api/wechathlink/admin/events/list'" @click="applyDetailSearch">查询</n-button>
+              <n-button v-permission="'btn:wechathlink_events:export'" :disabled="!selectedAccount" @click="exportCurrentEvents">导出当前结果</n-button>
             </div>
 
             <div v-if="detailRows.length" class="event-list">
@@ -219,7 +239,7 @@
               </div>
 
               <div v-if="selectedEvent?.mediaPath" class="events-panel__actions">
-                <n-button size="small" tertiary @click="openPreview(selectedEvent)">预览媒体</n-button>
+                <n-button v-permission="'btn:wechathlink_events:media'" size="small" tertiary @click="openPreview(selectedEvent)">预览媒体</n-button>
               </div>
             </div>
 
@@ -322,7 +342,7 @@
                       <div v-else class="detail-media__file">{{ selectedEvent.mediaFileName || 'media-file' }}</div>
 
                       <div class="detail-media__actions">
-                        <n-button size="small" tertiary @click="openPreview(selectedEvent)">查看</n-button>
+                        <n-button v-permission="'btn:wechathlink_events:media'" size="small" tertiary @click="openPreview(selectedEvent)">查看</n-button>
                         <a
                           :href="eventMediaUrl(selectedEvent)"
                           target="_blank"
@@ -357,7 +377,7 @@
                         placeholder="搜索联系人ID"
                         @keyup.enter="applyContactsSearch"
                       />
-                      <n-button @click="applyContactsSearch">查询</n-button>
+                      <n-button v-permission="'/api/wechathlink/admin/events/contacts'" @click="applyContactsSearch">查询</n-button>
                     </div>
                   </div>
 
@@ -463,6 +483,8 @@ import api from '../../api.js'
 import { ensureArray } from '../../utils/http'
 import ModalFrame from '../../components/ModalFrame.vue'
 
+const EVENT_FILTER_STORAGE_KEY = 'wechathlink:events:filters'
+
 const summaryKeyword = ref('')
 const summaryRows = ref([])
 const summaryLoading = ref(false)
@@ -484,8 +506,11 @@ const detailPaginationState = reactive({
 })
 const detailFilters = reactive({
   contactId: '',
+  keyword: '',
   direction: null,
-  eventType: null
+  eventType: null,
+  hasMedia: null,
+  dateRange: null
 })
 const selectedEvent = ref(null)
 const detailTab = ref('detail')
@@ -515,6 +540,11 @@ const eventTypeOptions = [
   { label: '文件', value: 'file' },
   { label: '视频', value: 'video' },
   { label: '语音', value: 'voice' }
+]
+
+const hasMediaOptions = [
+  { label: '仅含媒体', value: 1 },
+  { label: '仅无媒体', value: 0 }
 ]
 
 const selectedAccount = computed(() => summaryRows.value.find((item) => item.wechatAccountId === selectedAccountId.value) || null)
@@ -597,8 +627,12 @@ async function loadDetailEvents() {
     const payload = await api.listEvents({
       wechatAccountId: selectedAccount.value.wechatAccountId,
       contactId: detailFilters.contactId,
+      keyword: detailFilters.keyword,
       direction: detailFilters.direction,
       eventType: detailFilters.eventType,
+      hasMedia: detailFilters.hasMedia,
+      dateFrom: formatDateParam(detailFilters.dateRange?.[0]),
+      dateTo: formatDateParam(detailFilters.dateRange?.[1]),
       pageNum: detailPaginationState.page,
       pageSize: detailPaginationState.pageSize
     })
@@ -648,6 +682,7 @@ async function loadContacts() {
 }
 
 async function refreshWorkspace() {
+  persistEventFilterState()
   await loadSummary()
 }
 
@@ -659,11 +694,17 @@ async function selectAccount(row, options = {}) {
   selectedAccountId.value = row.wechatAccountId
   if (changed && !options.silentReset) {
     detailFilters.contactId = ''
+    detailFilters.keyword = ''
     contactsKeyword.value = ''
     detailTab.value = 'detail'
+    detailFilters.hasMedia = null
+    detailFilters.dateRange = null
+    detailFilters.direction = null
+    detailFilters.eventType = null
     detailPaginationState.page = 1
     contactsPaginationState.page = 1
   }
+  persistEventFilterState()
   await Promise.all([loadDetailEvents(), loadContacts()])
 }
 
@@ -688,6 +729,7 @@ async function applySummarySearch() {
 
 async function applyDetailSearch() {
   detailPaginationState.page = 1
+  persistEventFilterState()
   await loadDetailEvents()
 }
 
@@ -699,19 +741,42 @@ async function applyContactsSearch() {
 async function clearEventFilters() {
   summaryKeyword.value = ''
   detailFilters.contactId = ''
+  detailFilters.keyword = ''
   detailFilters.direction = null
   detailFilters.eventType = null
+  detailFilters.hasMedia = null
+  detailFilters.dateRange = null
   contactsKeyword.value = ''
   summaryPaginationState.page = 1
   detailPaginationState.page = 1
   contactsPaginationState.page = 1
+  persistEventFilterState()
   await loadSummary()
 }
 
 async function filterByContact(contactId) {
   detailFilters.contactId = contactId || ''
   detailPaginationState.page = 1
+  persistEventFilterState()
   await loadDetailEvents()
+}
+
+function exportCurrentEvents() {
+  if (!selectedAccount.value?.wechatAccountId) {
+    return
+  }
+  persistEventFilterState()
+  const url = api.getEventExportUrl({
+    wechatAccountId: selectedAccount.value.wechatAccountId,
+    contactId: detailFilters.contactId,
+    keyword: detailFilters.keyword,
+    direction: detailFilters.direction,
+    eventType: detailFilters.eventType,
+    hasMedia: detailFilters.hasMedia,
+    dateFrom: formatDateParam(detailFilters.dateRange?.[0]),
+    dateTo: formatDateParam(detailFilters.dateRange?.[1])
+  })
+  window.open(url, '_blank', 'noopener,noreferrer')
 }
 
 function openPreview(row) {
@@ -900,7 +965,64 @@ function toTimestamp(value) {
   return Number.isNaN(date.getTime()) ? 0 : date.getTime()
 }
 
-onMounted(loadSummary)
+function formatDateParam(value) {
+  if (!value) {
+    return ''
+  }
+  const date = new Date(Number(value))
+  if (Number.isNaN(date.getTime())) {
+    return ''
+  }
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+function persistEventFilterState() {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return
+  }
+  window.localStorage.setItem(EVENT_FILTER_STORAGE_KEY, JSON.stringify({
+    selectedAccountId: selectedAccountId.value,
+    summaryKeyword: summaryKeyword.value,
+    detailFilters: {
+      contactId: detailFilters.contactId,
+      keyword: detailFilters.keyword,
+      direction: detailFilters.direction,
+      eventType: detailFilters.eventType,
+      hasMedia: detailFilters.hasMedia,
+      dateRange: Array.isArray(detailFilters.dateRange) ? detailFilters.dateRange : null
+    }
+  }))
+}
+
+function restoreEventFilterState() {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return
+  }
+  const raw = window.localStorage.getItem(EVENT_FILTER_STORAGE_KEY)
+  if (!raw) {
+    return
+  }
+  try {
+    const parsed = JSON.parse(raw)
+    selectedAccountId.value = parsed?.selectedAccountId || null
+    summaryKeyword.value = parsed?.summaryKeyword || ''
+    detailFilters.contactId = parsed?.detailFilters?.contactId || ''
+    detailFilters.keyword = parsed?.detailFilters?.keyword || ''
+    detailFilters.direction = parsed?.detailFilters?.direction || null
+    detailFilters.eventType = parsed?.detailFilters?.eventType || null
+    detailFilters.hasMedia = parsed?.detailFilters?.hasMedia ?? null
+    detailFilters.dateRange = Array.isArray(parsed?.detailFilters?.dateRange) ? parsed.detailFilters.dateRange : null
+  } catch (error) {
+  }
+}
+
+onMounted(() => {
+  restoreEventFilterState()
+  loadSummary()
+})
 </script>
 
 <style scoped>
@@ -1073,7 +1195,7 @@ onMounted(loadSummary)
 
 .toolbar--filters {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) 160px 180px auto;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) 140px 160px 140px minmax(0, 1.2fr) auto auto;
   gap: 10px;
 }
 

@@ -6,10 +6,10 @@
       description="管理多微信账号资源、默认负责人和登录会话，支持成员协作与账号启停。"
     >
       <template #actions>
-        <n-button @click="loadAccounts">刷新</n-button>
-        <n-button @click="openLoginModal">扫码接入</n-button>
-        <n-button @click="openMemberModal()">成员授权</n-button>
-        <n-button type="primary" @click="openAccountModal()">新增账号</n-button>
+        <n-button v-permission="'/api/wechathlink/admin/accounts/list'" @click="loadAccounts">刷新</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:loginstart'" @click="openLoginModal">扫码接入</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:member'" @click="openMemberModal()">成员授权</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:create'" type="primary" @click="openAccountModal()">新增账号</n-button>
       </template>
     </page-header>
 
@@ -43,7 +43,7 @@
       </n-form>
       <template #footer>
         <n-button @click="accountModalVisible = false">取消</n-button>
-        <n-button type="primary" @click="submitAccount">保存</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:create'" type="primary" @click="submitAccount">保存</n-button>
       </template>
     </modal-frame>
 
@@ -93,15 +93,15 @@
       </n-space>
       <template #footer>
         <n-button @click="loginModalVisible = false">关闭</n-button>
-        <n-button @click="refreshLoginStatus" :disabled="!loginSession.sessionCode || loginPolling">刷新状态</n-button>
-        <n-button type="primary" @click="createLoginSession" :loading="creatingLoginSession">创建会话</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:loginstatus'" @click="refreshLoginStatus" :disabled="!loginSession.sessionCode || loginPolling">刷新状态</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:loginstart'" type="primary" @click="createLoginSession" :loading="creatingLoginSession">创建会话</n-button>
       </template>
     </modal-frame>
 
     <modal-frame v-model:show="memberModalVisible" title="成员授权" :height="520">
       <n-form label-placement="top">
         <n-form-item label="微信账号">
-          <n-select v-model:value="memberForm.wechatAccountId" :options="accountOptions" filterable />
+          <n-select v-model:value="memberForm.wechatAccountId" :options="accountOptions" filterable @update:value="handleMemberAccountChange" />
         </n-form-item>
         <n-form-item>
           <template #label>
@@ -115,10 +115,33 @@
           </template>
           <n-select v-model:value="memberForm.roleCode" :options="roleOptions" />
         </n-form-item>
+        <n-form-item>
+          <template #label>
+            <field-hint label="权限范围" tip="可在角色默认权限上微调，未选择时会按角色自动填充默认值。"/>
+          </template>
+          <div class="member-scope-editor">
+            <n-select
+              v-model:value="memberForm.permissionScopes"
+              :options="permissionScopeOptions"
+              multiple
+              clearable
+              placeholder="请选择权限范围"
+            />
+            <n-button v-permission="'btn:wechathlink_accounts:member'" tertiary @click="applyRoleDefaultScopes(memberForm.roleCode)">套用角色默认权限</n-button>
+          </div>
+        </n-form-item>
       </n-form>
+
+      <div v-if="memberForm.wechatAccountId" class="member-panel">
+        <div class="member-panel__head">
+          <strong>当前账号成员</strong>
+          <span>{{ memberRows.length }} 人</span>
+        </div>
+        <n-data-table :columns="memberColumns" :data="memberRows" :pagination="false" size="small" />
+      </div>
       <template #footer>
         <n-button @click="memberModalVisible = false">取消</n-button>
-        <n-button type="primary" @click="submitMember">保存成员</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:member'" type="primary" @click="submitMember">保存成员</n-button>
       </template>
     </modal-frame>
   </div>
@@ -133,6 +156,7 @@ import { resolveApiAssetUrl } from '../../config/env'
 import PageHeader from '../../components/PageHeader.vue'
 import FieldHint from '../../components/FieldHint.vue'
 import ModalFrame from '../../components/ModalFrame.vue'
+import { hasPermission } from '../../utils/permission'
 
 const form = reactive({
   id: null,
@@ -152,10 +176,12 @@ const creatingLoginSession = ref(false)
 const loginPolling = ref(false)
 const qrImageError = ref(false)
 let loginPollingTimer = null
+const memberRows = ref([])
 const memberForm = reactive({
   wechatAccountId: null,
   userId: '',
-  roleCode: 'OPERATOR'
+  roleCode: 'OPERATOR',
+  permissionScopes: []
 })
 
 const accountModalTitle = computed(() => form.id ? '编辑微信账号' : '新增微信账号')
@@ -180,6 +206,16 @@ const roleOptions = [
   { label: '审计', value: 'AUDITOR' }
 ]
 
+const permissionScopeOptions = [
+  { label: '读取', value: 'READ' },
+  { label: '操作', value: 'OPERATE' },
+  { label: '发送', value: 'SEND' },
+  { label: '导出', value: 'EXPORT' },
+  { label: '审计', value: 'AUDIT' },
+  { label: '媒体查看', value: 'MEDIA' },
+  { label: '设置管理', value: 'SETTINGS' }
+]
+
 const accountOptions = computed(() => rows.value.map((item) => ({
   label: `${item.accountName} (#${item.id})`,
   value: item.id
@@ -198,17 +234,113 @@ const columns = [
       'div',
       { style: 'display:flex;gap:8px;flex-wrap:wrap;' },
       [
-        h(NButton, { size: 'small', quaternary: true, onClick: () => openAccountModal(row) }, { default: () => '编辑' }),
-        h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.status === 1 ? '停用' : '启用') }),
-        h(NButton, { size: 'small', tertiary: true, onClick: () => openMemberModal(row) }, { default: () => '授权' })
-      ]
+        hasPermission('btn:wechathlink_accounts:create')
+          ? h(NButton, { size: 'small', quaternary: true, onClick: () => openAccountModal(row) }, { default: () => '编辑' })
+          : null,
+        hasPermission('btn:wechathlink_accounts:toggle')
+          ? h(NButton, { size: 'small', onClick: () => toggle(row) }, { default: () => (row.status === 1 ? '停用' : '启用') })
+          : null,
+        hasPermission('btn:wechathlink_accounts:member')
+          ? h(NButton, { size: 'small', tertiary: true, onClick: () => openMemberModal(row) }, { default: () => '授权' })
+          : null
+      ].filter(Boolean)
     )
+  }
+]
+
+const memberColumns = [
+  { title: '用户ID', key: 'userId', width: 100 },
+  {
+    title: '角色',
+    key: 'roleCode',
+    width: 100,
+    render: (row) => h(NTag, { bordered: false, type: roleTagType(row.roleCode) }, { default: () => roleLabel(row.roleCode) })
+  },
+  {
+    title: '权限范围',
+    key: 'permissionScope',
+    minWidth: 320,
+    render: (row) => h(
+      'div',
+      { style: 'display:flex;gap:6px;flex-wrap:wrap;' },
+      normalizePermissionScopes(row.permissionScope || row.permissionScopes).map((scope) =>
+        h(NTag, { size: 'small', bordered: false, type: 'info' }, { default: () => permissionScopeLabel(scope) })
+      )
+    )
+  },
+  {
+    title: '操作',
+    key: 'actions',
+    width: 100,
+    render: (row) => hasPermission('btn:wechathlink_accounts:member')
+      ? h(NButton, { size: 'small', tertiary: true, onClick: () => editMember(row) }, { default: () => '编辑' })
+      : null
   }
 ]
 
 async function loadAccounts() {
   const payload = await api.listAccounts()
   rows.value = ensureArray(payload?.list)
+}
+
+function roleLabel(value) {
+  const map = {
+    OWNER: '负责人',
+    OPERATOR: '运营',
+    ANALYST: '分析',
+    AUDITOR: '审计'
+  }
+  return map[value] || value || '-'
+}
+
+function roleTagType(value) {
+  if (value === 'OWNER') {
+    return 'success'
+  }
+  if (value === 'OPERATOR') {
+    return 'info'
+  }
+  if (value === 'AUDITOR') {
+    return 'warning'
+  }
+  return 'default'
+}
+
+function permissionScopeLabel(value) {
+  const map = {
+    READ: '读取',
+    OPERATE: '操作',
+    SEND: '发送',
+    EXPORT: '导出',
+    AUDIT: '审计',
+    MEDIA: '媒体查看',
+    SETTINGS: '设置管理',
+    FULL: '全部权限'
+  }
+  return map[value] || value || '-'
+}
+
+function defaultPermissionScopes(roleCode) {
+  const map = {
+    OWNER: ['FULL'],
+    OPERATOR: ['READ', 'OPERATE', 'SEND', 'EXPORT', 'MEDIA'],
+    ANALYST: ['READ', 'EXPORT', 'MEDIA'],
+    AUDITOR: ['READ', 'EXPORT', 'MEDIA', 'AUDIT']
+  }
+  return [...(map[roleCode] || ['READ'])]
+}
+
+function normalizePermissionScopes(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.filter(Boolean).map((item) => `${item}`.trim().toUpperCase()))]
+  }
+  const text = `${value || ''}`
+    .replace(/\[|\]|"|'/g, ' ')
+    .trim()
+  if (!text) {
+    return []
+  }
+  return [...new Set(text.split(/[,\s;]+/).filter(Boolean).map((item) => item.trim().toUpperCase()))]
 }
 
 function 登录状态文本(value) {
@@ -292,16 +424,46 @@ function openMemberModal(row = null) {
   memberForm.wechatAccountId = row?.id || null
   memberForm.userId = ''
   memberForm.roleCode = 'OPERATOR'
+  memberForm.permissionScopes = defaultPermissionScopes(memberForm.roleCode)
+  memberRows.value = []
   memberModalVisible.value = true
+  if (memberForm.wechatAccountId) {
+    loadMemberDetails(memberForm.wechatAccountId)
+  }
+}
+
+async function loadMemberDetails(accountId) {
+  if (!accountId) {
+    memberRows.value = []
+    return
+  }
+  const payload = await api.getAccountDetail(accountId)
+  memberRows.value = ensureArray(payload?.members)
+}
+
+function handleMemberAccountChange(value) {
+  memberForm.wechatAccountId = value
+  loadMemberDetails(value)
+}
+
+function applyRoleDefaultScopes(roleCode) {
+  memberForm.permissionScopes = defaultPermissionScopes(roleCode)
+}
+
+function editMember(row) {
+  memberForm.userId = `${row.userId || ''}`
+  memberForm.roleCode = row.roleCode || 'OPERATOR'
+  memberForm.permissionScopes = normalizePermissionScopes(row.permissionScope || row.permissionScopes)
 }
 
 async function submitMember() {
   await api.saveAccountMember({
     wechatAccountId: memberForm.wechatAccountId,
     userId: Number(memberForm.userId),
-    roleCode: memberForm.roleCode
+    roleCode: memberForm.roleCode,
+    permissionScope: normalizePermissionScopes(memberForm.permissionScopes).join(',')
   })
-  memberModalVisible.value = false
+  await loadMemberDetails(memberForm.wechatAccountId)
   await loadAccounts()
 }
 
@@ -399,5 +561,26 @@ onMounted(loadAccounts)
   color: #64748b;
   text-align: center;
   line-height: 1.6;
+}
+
+.member-scope-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.member-panel {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.member-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  color: #475569;
+  font-size: 13px;
 }
 </style>

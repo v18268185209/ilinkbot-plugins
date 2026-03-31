@@ -71,6 +71,11 @@ const api = {
     return resolveApiAssetUrl(`/api${adminPrefix}/events/media?eventId=${encodeURIComponent(eventId)}`)
   },
 
+  getEventExportUrl(params = {}) {
+    const query = new URLSearchParams(compactParams(params))
+    return resolveApiAssetUrl(`/api${adminPrefix}/events/export${query.toString() ? `?${query.toString()}` : ''}`)
+  },
+
   uploadMessageFile(file) {
     const formData = new FormData()
     formData.append('file', file)
@@ -97,6 +102,18 @@ const api = {
 
   saveSettings(data) {
     return httpPost(`${adminPrefix}/settings/save`, data)
+  },
+
+  listAuditLogs(params = {}) {
+    return httpGet(`${adminPrefix}/audit/list`, {
+      params: compactParams(params)
+    })
+  },
+
+  getAuditDetail(id) {
+    return httpGet(`${adminPrefix}/audit/detail`, {
+      params: compactParams({ id })
+    })
   }
 }
 

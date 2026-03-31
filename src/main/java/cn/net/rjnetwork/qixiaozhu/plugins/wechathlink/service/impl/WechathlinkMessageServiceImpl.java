@@ -8,6 +8,7 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountM
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkEventMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkLogMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkPeerContextMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkMessageService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkApi;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkModels;
@@ -37,6 +38,7 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
     private final WechathlinkPermissionService permissionService;
     private final WechathlinkRuntimeConfigService runtimeConfigService;
     private final IlinkApi ilinkClient;
+    private final WechathlinkAuditService auditService;
 
     public WechathlinkMessageServiceImpl(WechathlinkAccountMapper accountMapper,
                                          WechathlinkEventMapper eventMapper,
@@ -44,7 +46,8 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
                                          WechathlinkPeerContextMapper peerContextMapper,
                                          WechathlinkPermissionService permissionService,
                                          WechathlinkRuntimeConfigService runtimeConfigService,
-                                         IlinkApi ilinkClient) {
+                                         IlinkApi ilinkClient,
+                                         WechathlinkAuditService auditService) {
         this.accountMapper = accountMapper;
         this.eventMapper = eventMapper;
         this.logMapper = logMapper;
@@ -52,11 +55,12 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
         this.permissionService = permissionService;
         this.runtimeConfigService = runtimeConfigService;
         this.ilinkClient = ilinkClient;
+        this.auditService = auditService;
     }
 
     @Override
     public Map<String, Object> listPeers(Long wechatAccountId, String keyword, Integer pageNum, Integer pageSize) {
-        WechathlinkAccount account = requireOperableAccount(wechatAccountId);
+        WechathlinkAccount account = requireReadableAccount(wechatAccountId);
         Page<WechathlinkPeerContext> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
         LambdaQueryWrapper<WechathlinkPeerContext> wrapper = new LambdaQueryWrapper<WechathlinkPeerContext>()
                 .eq(WechathlinkPeerContext::getWechatAccountId, account.getId())
@@ -120,85 +124,114 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> sendText(Map<String, Object> body) {
-        WechathlinkAccount account = requireOperableAccount(asLong(body.get("wechatAccountId")));
+        WechathlinkAccount account = requireSendableAccount(asLong(body.get("wechatAccountId")));
         String toUserId = asString(body.get("toUserId"));
         String text = asString(body.get("text"));
         if (!StringUtils.hasText(toUserId) || !StringUtils.hasText(text)) {
             throw new IllegalArgumentException("wechatAccountId, toUserId and text are required");
         }
+        Map<String, Object> auditPayload = Map.of(
+                "wechatAccountId", account.getId(),
+                "toUserId", toUserId,
+                "eventType", "text",
+                "textLength", text.length()
+        );
         String contextToken = resolveContextToken(account.getId(), toUserId, asString(body.get("contextToken")));
         if (!StringUtils.hasText(contextToken)) {
             throw new IllegalArgumentException("context token not found for this user; current text sending only supports replying to users who have already sent a message");
         }
-        var runtime = runtimeConfigService.current();
-        ilinkClient.sendTextMessage(account.getBaseUrl(), account.getBotToken(), toUserId, text, contextToken, "2.0.1", runtime.pollTimeoutMs());
-        WechathlinkEvent event = new WechathlinkEvent();
-        event.setWechatAccountId(account.getId());
-        event.setDirection("outbound");
-        event.setEventType("text");
-        event.setToUserId(toUserId);
-        event.setBodyText(text);
-        event.setContextToken(contextToken);
-        event.setOwnerUserId(account.getOwnerUserId());
-        event.setRawJson(writeJson(new LinkedHashMap<>(body)));
-        fillCreateAudit(event);
-        eventMapper.insert(event);
-        touchPeerContext(account, toUserId, contextToken);
-        createLog(account.getId(), "INFO", "outbound text message queued", "send-text", event.getRawJson());
-        return Map.of("ok", true, "eventId", event.getId());
+        try {
+            var runtime = runtimeConfigService.current();
+            ilinkClient.sendTextMessage(account.getBaseUrl(), account.getBotToken(), toUserId, text, contextToken, "2.0.1", runtime.pollTimeoutMs());
+            WechathlinkEvent event = new WechathlinkEvent();
+            event.setWechatAccountId(account.getId());
+            event.setDirection("outbound");
+            event.setEventType("text");
+            event.setToUserId(toUserId);
+            event.setBodyText(text);
+            event.setContextToken(contextToken);
+            event.setOwnerUserId(account.getOwnerUserId());
+            event.setRawJson(writeJson(new LinkedHashMap<>(body)));
+            fillCreateAudit(event);
+            eventMapper.insert(event);
+            touchPeerContext(account, toUserId, contextToken);
+            createLog(account.getId(), "INFO", "outbound text message queued", "send-text", event.getRawJson());
+            Map<String, Object> successPayload = new LinkedHashMap<>(auditPayload);
+            successPayload.put("eventId", event.getId());
+            auditService.recordSuccess(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", event.getId(), "outbound text message queued", successPayload);
+            return Map.of("ok", true, "eventId", event.getId());
+        } catch (RuntimeException ex) {
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", null, "outbound text message send failed", ex, auditPayload);
+            throw ex;
+        }
     }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> sendMedia(Map<String, Object> body) {
-        WechathlinkAccount account = requireOperableAccount(asLong(body.get("wechatAccountId")));
+        WechathlinkAccount account = requireSendableAccount(asLong(body.get("wechatAccountId")));
         String toUserId = asString(body.get("toUserId"));
         String mediaType = defaultValue(asString(body.get("type")), "image");
         String filePath = asString(body.get("filePath"));
         if (!StringUtils.hasText(toUserId) || !StringUtils.hasText(filePath)) {
             throw new IllegalArgumentException("wechatAccountId, toUserId and filePath are required");
         }
+        Map<String, Object> auditPayload = Map.of(
+                "wechatAccountId", account.getId(),
+                "toUserId", toUserId,
+                "eventType", mediaType,
+                "fileName", Path.of(filePath).getFileName().toString()
+        );
         String contextToken = resolveContextToken(account.getId(), toUserId, asString(body.get("contextToken")));
         if (!StringUtils.hasText(contextToken)) {
             throw new IllegalArgumentException("context token not found for this user; current media sending only supports replying to users who have already sent a message");
         }
-        var runtime = runtimeConfigService.current();
-        String normalizedType = defaultValue(asString(body.get("type")), detectMediaType(filePath));
-        int uploadType = toUploadType(normalizedType);
-        IlinkModels.UploadedMedia uploadedMedia = ilinkClient.uploadLocalMedia(
-                runtime.cdnBaseUrl(),
-                account.getBaseUrl(),
-                account.getBotToken(),
-                toUserId,
-                Path.of(filePath),
-                uploadType,
-                "2.0.1",
-                runtime.pollTimeoutMs()
-        );
-        String text = asString(body.get("text"));
-        switch (normalizedType) {
-            case "image" -> ilinkClient.sendImageMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
-            case "video" -> ilinkClient.sendVideoMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
-            case "voice" -> ilinkClient.sendVoiceMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, detectVoiceEncodeType(filePath), uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
-            default -> ilinkClient.sendFileMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, Path.of(filePath).getFileName().toString(), uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
+        try {
+            var runtime = runtimeConfigService.current();
+            String normalizedType = defaultValue(asString(body.get("type")), detectMediaType(filePath));
+            int uploadType = toUploadType(normalizedType);
+            IlinkModels.UploadedMedia uploadedMedia = ilinkClient.uploadLocalMedia(
+                    runtime.cdnBaseUrl(),
+                    account.getBaseUrl(),
+                    account.getBotToken(),
+                    toUserId,
+                    Path.of(filePath),
+                    uploadType,
+                    "2.0.1",
+                    runtime.pollTimeoutMs()
+            );
+            String text = asString(body.get("text"));
+            switch (normalizedType) {
+                case "image" -> ilinkClient.sendImageMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
+                case "video" -> ilinkClient.sendVideoMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
+                case "voice" -> ilinkClient.sendVoiceMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, detectVoiceEncodeType(filePath), uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
+                default -> ilinkClient.sendFileMessage(account.getBaseUrl(), account.getBotToken(), toUserId, contextToken, text, Path.of(filePath).getFileName().toString(), uploadedMedia, "2.0.1", runtime.pollTimeoutMs());
+            }
+            WechathlinkEvent event = new WechathlinkEvent();
+            event.setWechatAccountId(account.getId());
+            event.setDirection("outbound");
+            event.setEventType(normalizedType);
+            event.setToUserId(toUserId);
+            event.setBodyText(text);
+            event.setMediaPath(filePath);
+            event.setMediaFileName(Path.of(filePath).getFileName().toString());
+            event.setMediaMimeType(detectOutboundMime(normalizedType, filePath));
+            event.setContextToken(contextToken);
+            event.setOwnerUserId(account.getOwnerUserId());
+            event.setRawJson(writeJson(new LinkedHashMap<>(body)));
+            fillCreateAudit(event);
+            eventMapper.insert(event);
+            touchPeerContext(account, toUserId, contextToken);
+            createLog(account.getId(), "INFO", "outbound media message queued", "send-media", event.getRawJson());
+            Map<String, Object> successPayload = new LinkedHashMap<>(auditPayload);
+            successPayload.put("eventId", event.getId());
+            successPayload.put("normalizedType", normalizedType);
+            auditService.recordSuccess(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE", event.getId(), "outbound media message queued", successPayload);
+            return Map.of("ok", true, "eventId", event.getId());
+        } catch (RuntimeException ex) {
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE", null, "outbound media message send failed", ex, auditPayload);
+            throw ex;
         }
-        WechathlinkEvent event = new WechathlinkEvent();
-        event.setWechatAccountId(account.getId());
-        event.setDirection("outbound");
-        event.setEventType(normalizedType);
-        event.setToUserId(toUserId);
-        event.setBodyText(text);
-        event.setMediaPath(filePath);
-        event.setMediaFileName(Path.of(filePath).getFileName().toString());
-        event.setMediaMimeType(detectOutboundMime(normalizedType, filePath));
-        event.setContextToken(contextToken);
-        event.setOwnerUserId(account.getOwnerUserId());
-        event.setRawJson(writeJson(new LinkedHashMap<>(body)));
-        fillCreateAudit(event);
-        eventMapper.insert(event);
-        touchPeerContext(account, toUserId, contextToken);
-        createLog(account.getId(), "INFO", "outbound media message queued", "send-media", event.getRawJson());
-        return Map.of("ok", true, "eventId", event.getId());
     }
 
     private String defaultValue(String value, String fallback) {
@@ -365,12 +398,23 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
         return peerUserId;
     }
 
-    private WechathlinkAccount requireOperableAccount(Long accountId) {
+    private WechathlinkAccount requireReadableAccount(Long accountId) {
         if (accountId == null) {
             throw new IllegalArgumentException("wechatAccountId required");
         }
         WechathlinkAccount account = accountMapper.selectById(accountId);
-        if (account == null || !permissionService.canOperate(account)) {
+        if (account == null || !permissionService.canRead(account)) {
+            throw new IllegalArgumentException("wechat account not found or no permission");
+        }
+        return account;
+    }
+
+    private WechathlinkAccount requireSendableAccount(Long accountId) {
+        if (accountId == null) {
+            throw new IllegalArgumentException("wechatAccountId required");
+        }
+        WechathlinkAccount account = accountMapper.selectById(accountId);
+        if (account == null || !permissionService.canSend(account)) {
             throw new IllegalArgumentException("wechat account not found or no permission");
         }
         return account;

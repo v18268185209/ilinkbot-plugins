@@ -7,7 +7,7 @@
             <div class="sidebar-block">
               <div class="sidebar-block__label-row">
                 <label class="field-label">微信账号</label>
-                <n-button size="small" tertiary @click="refreshWorkspace">刷新</n-button>
+                <n-button v-permission="'/api/wechathlink/admin/messages/peers'" size="small" tertiary @click="refreshWorkspace">刷新</n-button>
               </div>
               <n-select
                 v-model:value="selectedAccountId"
@@ -22,7 +22,7 @@
               <label class="field-label">联系人搜索</label>
               <div class="contact-search">
                 <n-input v-model:value="contactKeyword" placeholder="输入联系人ID" />
-                <n-button @click="applyContactSearch">查询</n-button>
+                <n-button v-permission="'/api/wechathlink/admin/messages/peers'" @click="applyContactSearch">查询</n-button>
               </div>
             </div>
 
@@ -146,7 +146,7 @@
                 placeholder="消息类型"
                 style="width: 180px;"
               />
-              <n-button @click="applyConversationFilter">筛选</n-button>
+              <n-button v-permission="'/api/wechathlink/admin/events/list'" @click="applyConversationFilter">筛选</n-button>
             </div>
           </div>
 
@@ -202,7 +202,7 @@
                   <div v-else class="message-bubble__file">{{ row.mediaFileName || 'media-file' }}</div>
 
                   <div class="message-bubble__actions">
-                    <n-button size="small" tertiary @click="openPreview(row)">查看</n-button>
+                    <n-button v-permission="'btn:wechathlink_messages:media'" size="small" tertiary @click="openPreview(row)">查看</n-button>
                     <a :href="eventMediaUrl(row)" target="_blank" rel="noreferrer" class="message-bubble__link">新窗口</a>
                   </div>
                 </div>
@@ -250,6 +250,7 @@
               <div class="chat-composer__footer">
                 <span>{{ textDraft.length }} 字</span>
                 <n-button
+                  v-permission="'btn:wechathlink_messages:sendtext'"
                   type="primary"
                   :loading="sendingText"
                   :disabled="!canSendText"
@@ -269,7 +270,7 @@
                   class="visually-hidden"
                   @change="handleFileChange"
                 />
-                <n-button @click="triggerFilePicker" :loading="uploadingMedia">选择文件</n-button>
+                <n-button v-permission="'btn:wechathlink_messages:upload'" @click="triggerFilePicker" :loading="uploadingMedia">选择文件</n-button>
               </div>
 
               <div v-if="uploadedMedia" class="upload-card">
@@ -284,8 +285,8 @@
                   <video v-else-if="uploadPreviewKind === 'video'" :src="uploadPreviewUrl" controls class="upload-card__video" />
                 </div>
                 <div class="inline-actions">
-                  <n-button size="small" tertiary @click="triggerFilePicker">重新选择</n-button>
-                  <n-button size="small" quaternary @click="clearUploadedMedia">清除</n-button>
+                  <n-button v-permission="'btn:wechathlink_messages:upload'" size="small" tertiary @click="triggerFilePicker">重新选择</n-button>
+                  <n-button v-permission="'btn:wechathlink_messages:upload'" size="small" quaternary @click="clearUploadedMedia">清除</n-button>
                 </div>
               </div>
               <n-empty v-else description="请选择要发送的文件" />
@@ -300,6 +301,7 @@
               <div class="chat-composer__footer">
                 <span>{{ uploadedMedia ? '文件已上传' : '未选择文件' }}</span>
                 <n-button
+                  v-permission="'btn:wechathlink_messages:sendmedia'"
                   type="primary"
                   :loading="sendingMedia"
                   :disabled="!canSendMedia"

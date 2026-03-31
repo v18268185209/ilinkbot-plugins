@@ -7,7 +7,25 @@ import java.util.Map;
 public interface WechathlinkEventService {
     Map<String, Object> summary(String keyword, Integer pageNum, Integer pageSize);
 
-    Map<String, Object> list(Long wechatAccountId, String contactId, String direction, String eventType, Integer pageNum, Integer pageSize);
+    Map<String, Object> list(Long wechatAccountId,
+                            String contactId,
+                            String direction,
+                            String eventType,
+                            String dateFrom,
+                            String dateTo,
+                            String keyword,
+                            Integer hasMedia,
+                            Integer pageNum,
+                            Integer pageSize);
+
+    byte[] export(Long wechatAccountId,
+                  String contactId,
+                  String direction,
+                  String eventType,
+                  String dateFrom,
+                  String dateTo,
+                  String keyword,
+                  Integer hasMedia);
 
     Map<String, Object> contacts(Long wechatAccountId, String keyword, Integer pageNum, Integer pageSize);
 

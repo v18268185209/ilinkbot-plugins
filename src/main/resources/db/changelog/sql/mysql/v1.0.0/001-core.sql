@@ -121,6 +121,29 @@ CREATE TABLE IF NOT EXISTS wcf_log (
     status INT NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS wcf_audit_log (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    wechat_account_id BIGINT NULL,
+    operator_user_id BIGINT NULL,
+    operator_user_name VARCHAR(255) DEFAULT '',
+    action_type VARCHAR(64) NOT NULL,
+    resource_type VARCHAR(64) NOT NULL,
+    resource_id VARCHAR(255) DEFAULT '',
+    result_status VARCHAR(32) NOT NULL,
+    summary VARCHAR(1024) NOT NULL,
+    detail_json LONGTEXT,
+    create_user_id BIGINT NULL,
+    update_user_id BIGINT NULL,
+    company_id BIGINT NULL,
+    dept_id BIGINT NULL,
+    create_time DATETIME NOT NULL,
+    update_time DATETIME NOT NULL,
+    is_deleted INT NOT NULL DEFAULT 0,
+    status INT NOT NULL DEFAULT 1,
+    KEY idx_wcf_audit_account_time (wechat_account_id, create_time),
+    KEY idx_wcf_audit_operator_time (operator_user_id, create_time)
+);
+
 CREATE TABLE IF NOT EXISTS wcf_setting (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     config_group VARCHAR(64) NOT NULL,

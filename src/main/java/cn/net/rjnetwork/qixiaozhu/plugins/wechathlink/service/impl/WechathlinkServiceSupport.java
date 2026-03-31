@@ -8,6 +8,8 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.time.LocalDateTime;
+import java.lang.reflect.Method;
+import java.util.List;
 import java.util.Map;
 
 public abstract class WechathlinkServiceSupport {
@@ -79,5 +81,35 @@ public abstract class WechathlinkServiceSupport {
         } catch (JsonProcessingException ex) {
             return "{}";
         }
+    }
+
+    protected String writeJsonObject(Object payload) {
+        try {
+            return OBJECT_MAPPER.writeValueAsString(payload);
+        } catch (JsonProcessingException ex) {
+            return "{}";
+        }
+    }
+
+    protected boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    protected String resolveCurrentAccountName() {
+        CurrentAccount current = currentAccount();
+        if (current == null) {
+            return "standalone";
+        }
+        for (String methodName : List.of("getRealName", "getUserName", "getUsername", "getLoginName", "getAccountName", "getName", "getNickName")) {
+            try {
+                Method method = current.getClass().getMethod(methodName);
+                Object value = method.invoke(current);
+                if (value != null && hasText(String.valueOf(value))) {
+                    return String.valueOf(value).trim();
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return current.getId() == null ? "unknown" : "user#" + current.getId();
     }
 }

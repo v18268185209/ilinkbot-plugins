@@ -6,13 +6,17 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkPeerCont
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkEventMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkPeerContextMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkEventService;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
 import java.time.LocalDateTime;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,15 +30,18 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
     private final WechathlinkEventMapper eventMapper;
     private final WechathlinkPeerContextMapper peerContextMapper;
     private final WechathlinkPermissionService permissionService;
+    private final WechathlinkAuditService auditService;
 
     public WechathlinkEventServiceImpl(WechathlinkAccountMapper accountMapper,
                                        WechathlinkEventMapper eventMapper,
                                        WechathlinkPeerContextMapper peerContextMapper,
-                                       WechathlinkPermissionService permissionService) {
+                                       WechathlinkPermissionService permissionService,
+                                       WechathlinkAuditService auditService) {
         this.accountMapper = accountMapper;
         this.eventMapper = eventMapper;
         this.peerContextMapper = peerContextMapper;
         this.permissionService = permissionService;
+        this.auditService = auditService;
     }
 
     @Override
@@ -66,43 +73,82 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
     }
 
     @Override
-    public Map<String, Object> list(Long wechatAccountId, String contactId, String direction, String eventType, Integer pageNum, Integer pageSize) {
-        WechathlinkAccount account = null;
-        if (wechatAccountId != null) {
-            account = requireReadableAccount(wechatAccountId);
-        }
+    public Map<String, Object> list(Long wechatAccountId,
+                                    String contactId,
+                                    String direction,
+                                    String eventType,
+                                    String dateFrom,
+                                    String dateTo,
+                                    String keyword,
+                                    Integer hasMedia,
+                                    Integer pageNum,
+                                    Integer pageSize) {
         Page<WechathlinkEvent> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
-        LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
-                .eq(WechathlinkEvent::getIsDeleted, 0);
-        Set<Long> accountIds = permissionService.readableAccountIds();
-        if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
-            if (wechatAccountId == null) {
-                if (accountIds.isEmpty()) {
-                    return pageResult(List.of(), 0L, page);
-                }
-                wrapper.in(WechathlinkEvent::getWechatAccountId, accountIds);
-            }
-        }
-        if (wechatAccountId != null) {
-            wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
-        }
-        if (StringUtils.hasText(contactId)) {
-            String target = contactId.trim();
-            if (account != null && StringUtils.hasText(account.getAccountCode()) && account.getAccountCode().trim().equals(target)) {
-                return pageResult(List.of(), 0L, page);
-            }
-            wrapper.and(w -> w.eq(WechathlinkEvent::getFromUserId, target)
-                    .or().eq(WechathlinkEvent::getToUserId, target));
-        }
-        if (StringUtils.hasText(direction)) {
-            wrapper.eq(WechathlinkEvent::getDirection, direction.trim());
-        }
-        if (StringUtils.hasText(eventType)) {
-            wrapper.eq(WechathlinkEvent::getEventType, eventType.trim());
+        LambdaQueryWrapper<WechathlinkEvent> wrapper = buildEventQuery(
+                wechatAccountId,
+                contactId,
+                direction,
+                eventType,
+                dateFrom,
+                dateTo,
+                keyword,
+                hasMedia
+        );
+        if (wrapper == null) {
+            return pageResult(List.of(), 0L, page);
         }
         wrapper.orderByDesc(WechathlinkEvent::getCreateTime).orderByDesc(WechathlinkEvent::getId);
         Page<WechathlinkEvent> result = eventMapper.selectPage(page, wrapper);
         return pageResult(result.getRecords(), result.getTotal(), result);
+    }
+
+    @Override
+    public byte[] export(Long wechatAccountId,
+                         String contactId,
+                         String direction,
+                         String eventType,
+                         String dateFrom,
+                         String dateTo,
+                         String keyword,
+                         Integer hasMedia) {
+        WechathlinkAccount account = requireReadableAccount(wechatAccountId);
+        if (!permissionService.canExport(account)) {
+            throw new IllegalArgumentException("wechat account not found or no permission");
+        }
+        Map<String, Object> auditPayload = new LinkedHashMap<>();
+        auditPayload.put("wechatAccountId", wechatAccountId);
+        auditPayload.put("contactId", contactId);
+        auditPayload.put("direction", direction);
+        auditPayload.put("eventType", eventType);
+        auditPayload.put("dateFrom", dateFrom);
+        auditPayload.put("dateTo", dateTo);
+        auditPayload.put("keyword", keyword);
+        auditPayload.put("hasMedia", hasMedia);
+        try {
+            LambdaQueryWrapper<WechathlinkEvent> wrapper = buildEventQuery(
+                    wechatAccountId,
+                    contactId,
+                    direction,
+                    eventType,
+                    dateFrom,
+                    dateTo,
+                    keyword,
+                    hasMedia
+            );
+            if (wrapper == null) {
+                auditPayload.put("rowCount", 0);
+                auditService.recordSuccess(wechatAccountId, "EVENT_EXPORT", "EVENT", wechatAccountId, "event export completed", auditPayload);
+                return csvHeader().getBytes(StandardCharsets.UTF_8);
+            }
+            wrapper.orderByDesc(WechathlinkEvent::getCreateTime).orderByDesc(WechathlinkEvent::getId);
+            List<WechathlinkEvent> rows = eventMapper.selectList(wrapper);
+            auditPayload.put("rowCount", rows.size());
+            auditService.recordSuccess(wechatAccountId, "EVENT_EXPORT", "EVENT", wechatAccountId, "event export completed", auditPayload);
+            return buildCsv(rows).getBytes(StandardCharsets.UTF_8);
+        } catch (RuntimeException ex) {
+            auditService.recordFailure(wechatAccountId, "EVENT_EXPORT", "EVENT", wechatAccountId, "event export failed", ex, auditPayload);
+            throw ex;
+        }
     }
 
     @Override
@@ -164,7 +210,10 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         if (event == null || event.getWechatAccountId() == null) {
             throw new IllegalArgumentException("event not found");
         }
-        requireReadableAccount(event.getWechatAccountId());
+        WechathlinkAccount account = requireReadableAccount(event.getWechatAccountId());
+        if (!permissionService.canViewMedia(account)) {
+            throw new IllegalArgumentException("event not found or no permission");
+        }
         return event;
     }
 
@@ -237,6 +286,125 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
             throw new IllegalArgumentException("wechat account not found or no permission");
         }
         return account;
+    }
+
+    private LambdaQueryWrapper<WechathlinkEvent> buildEventQuery(Long wechatAccountId,
+                                                                 String contactId,
+                                                                 String direction,
+                                                                 String eventType,
+                                                                 String dateFrom,
+                                                                 String dateTo,
+                                                                 String keyword,
+                                                                 Integer hasMedia) {
+        WechathlinkAccount account = null;
+        if (wechatAccountId != null) {
+            account = requireReadableAccount(wechatAccountId);
+        }
+        LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
+                .eq(WechathlinkEvent::getIsDeleted, 0);
+        Set<Long> accountIds = permissionService.readableAccountIds();
+        if (!permissionService.standaloneMode() && !permissionService.superAccount()) {
+            if (wechatAccountId == null) {
+                if (accountIds.isEmpty()) {
+                    return null;
+                }
+                wrapper.in(WechathlinkEvent::getWechatAccountId, accountIds);
+            }
+        }
+        if (wechatAccountId != null) {
+            wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
+        }
+        if (StringUtils.hasText(contactId)) {
+            String target = contactId.trim();
+            if (account != null && StringUtils.hasText(account.getAccountCode()) && account.getAccountCode().trim().equals(target)) {
+                return null;
+            }
+            wrapper.and(w -> w.eq(WechathlinkEvent::getFromUserId, target)
+                    .or().eq(WechathlinkEvent::getToUserId, target));
+        }
+        if (StringUtils.hasText(direction)) {
+            wrapper.eq(WechathlinkEvent::getDirection, direction.trim());
+        }
+        if (StringUtils.hasText(eventType)) {
+            wrapper.eq(WechathlinkEvent::getEventType, eventType.trim());
+        }
+        LocalDateTime from = parseDateTime(dateFrom, false);
+        if (from != null) {
+            wrapper.ge(WechathlinkEvent::getCreateTime, from);
+        }
+        LocalDateTime to = parseDateTime(dateTo, true);
+        if (to != null) {
+            wrapper.le(WechathlinkEvent::getCreateTime, to);
+        }
+        if (StringUtils.hasText(keyword)) {
+            String normalizedKeyword = keyword.trim();
+            wrapper.and(w -> w.like(WechathlinkEvent::getBodyText, normalizedKeyword)
+                    .or().like(WechathlinkEvent::getMediaFileName, normalizedKeyword)
+                    .or().like(WechathlinkEvent::getFromUserId, normalizedKeyword)
+                    .or().like(WechathlinkEvent::getToUserId, normalizedKeyword));
+        }
+        if (hasMedia != null) {
+            if (Integer.valueOf(1).equals(hasMedia)) {
+                wrapper.and(w -> w.ne(WechathlinkEvent::getMediaPath, "")
+                        .or().ne(WechathlinkEvent::getMediaFileName, ""));
+            } else if (Integer.valueOf(0).equals(hasMedia)) {
+                wrapper.and(w -> w.and(i -> i.eq(WechathlinkEvent::getMediaPath, "").or().isNull(WechathlinkEvent::getMediaPath))
+                        .and(i -> i.eq(WechathlinkEvent::getMediaFileName, "").or().isNull(WechathlinkEvent::getMediaFileName)));
+            }
+        }
+        return wrapper;
+    }
+
+    private LocalDateTime parseDateTime(String value, boolean endOfDay) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        String text = value.trim();
+        try {
+            return LocalDateTime.parse(text, DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+        } catch (Exception ignored) {
+        }
+        try {
+            return LocalDateTime.parse(text, DateTimeFormatter.ISO_LOCAL_DATE_TIME);
+        } catch (Exception ignored) {
+        }
+        try {
+            LocalDate date = LocalDate.parse(text, DateTimeFormatter.ISO_LOCAL_DATE);
+            return endOfDay ? date.atTime(23, 59, 59) : date.atStartOfDay();
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private String buildCsv(List<WechathlinkEvent> rows) {
+        StringBuilder builder = new StringBuilder();
+        builder.append(csvHeader());
+        for (WechathlinkEvent row : rows) {
+            builder.append(csvValue(row.getId())).append(',')
+                    .append(csvValue(row.getWechatAccountId())).append(',')
+                    .append(csvValue(row.getCreateTime())).append(',')
+                    .append(csvValue(row.getDirection())).append(',')
+                    .append(csvValue(row.getEventType())).append(',')
+                    .append(csvValue(row.getFromUserId())).append(',')
+                    .append(csvValue(row.getToUserId())).append(',')
+                    .append(csvValue(row.getMessageId())).append(',')
+                    .append(csvValue(row.getBodyText())).append(',')
+                    .append(csvValue(row.getMediaFileName())).append(',')
+                    .append(csvValue(row.getMediaMimeType())).append(',')
+                    .append(csvValue(row.getMediaPath())).append(',')
+                    .append(csvValue(row.getContextToken()))
+                    .append('\n');
+        }
+        return builder.toString();
+    }
+
+    private String csvHeader() {
+        return "\uFEFFid,wechatAccountId,createTime,direction,eventType,fromUserId,toUserId,messageId,bodyText,mediaFileName,mediaMimeType,mediaPath,contextToken\n";
+    }
+
+    private String csvValue(Object value) {
+        String text = value == null ? "" : String.valueOf(value);
+        return "\"" + text.replace("\"", "\"\"") + "\"";
     }
 
     private int normalizePageNum(Integer pageNum) {

@@ -65,9 +65,13 @@ public class WechathlinkOpenApiController {
                                       @RequestParam(required = false) String contactId,
                                       @RequestParam(required = false) String direction,
                                       @RequestParam(required = false) String eventType,
+                                      @RequestParam(required = false) String dateFrom,
+                                      @RequestParam(required = false) String dateTo,
+                                      @RequestParam(required = false) String keyword,
+                                      @RequestParam(required = false) Integer hasMedia,
                                       @RequestParam(required = false) Integer pageNum,
                                       @RequestParam(required = false) Integer pageSize) {
-        return eventService.list(wechatAccountId, contactId, direction, eventType, pageNum, pageSize);
+        return eventService.list(wechatAccountId, contactId, direction, eventType, dateFrom, dateTo, keyword, hasMedia, pageNum, pageSize);
     }
 
     @GetMapping("/settings")

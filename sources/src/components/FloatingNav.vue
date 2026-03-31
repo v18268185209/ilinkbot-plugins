@@ -3,7 +3,7 @@
     <transition name="floating-nav-panel">
       <div v-if="expanded" class="floating-nav__panel">
         <button
-          v-for="item in navItems"
+          v-for="item in visibleNavItems"
           :key="item.path"
           type="button"
           class="floating-nav__item"
@@ -22,20 +22,24 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { hasPermission } from '../utils/permission'
 
 const route = useRoute()
 const router = useRouter()
 const expanded = ref(false)
 
 const navItems = [
-  { label: '工作台', kicker: '总览', path: '/overview' },
-  { label: '微信账号', kicker: '账号', path: '/accounts' },
-  { label: '事件中心', kicker: '事件', path: '/events' },
-  { label: '消息发送', kicker: '发送', path: '/messages' },
-  { label: '设置中心', kicker: '设置', path: '/settings' }
+  { label: '工作台', kicker: '总览', path: '/overview', permission: '/dashboard/plugins/wechathlink/overview' },
+  { label: '微信账号', kicker: '账号', path: '/accounts', permission: '/dashboard/plugins/wechathlink/accounts' },
+  { label: '事件中心', kicker: '事件', path: '/events', permission: '/dashboard/plugins/wechathlink/events' },
+  { label: '消息发送', kicker: '发送', path: '/messages', permission: '/dashboard/plugins/wechathlink/messages' },
+  { label: '审计中心', kicker: '审计', path: '/audits', permission: '/dashboard/plugins/wechathlink/audits' },
+  { label: '设置中心', kicker: '设置', path: '/settings', permission: '/dashboard/plugins/wechathlink/settings' }
 ]
+
+const visibleNavItems = computed(() => navItems.filter((item) => hasPermission(item.permission)))
 
 function go(path) {
   expanded.value = false

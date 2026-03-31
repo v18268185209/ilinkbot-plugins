@@ -6,7 +6,7 @@
       description="统一观察多微信账号接入状态、轮询健康度、入站/出站事件数量与近期异常日志。"
     >
       <template #actions>
-        <n-button type="primary" @click="loadSummary">刷新数据</n-button>
+        <n-button v-permission="'/api/wechathlink/admin/dashboard/summary'" type="primary" @click="loadSummary">刷新数据</n-button>
       </template>
     </page-header>
 

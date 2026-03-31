@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import App from './App.vue'
 import router from './exts/router/index'
 import appEnv from './config/env'
+import { hasAnyPermission, hasPermission, resolvePermissionVisible } from './utils/permission'
 import {
   create,
   NAlert,
@@ -9,6 +10,7 @@ import {
   NCard,
   NConfigProvider,
   NDataTable,
+  NDatePicker,
   NDialogProvider,
   NEmpty,
   NForm,
@@ -36,6 +38,7 @@ const naive = create({
     NCard,
     NConfigProvider,
     NDataTable,
+    NDatePicker,
     NDialogProvider,
     NEmpty,
     NForm,
@@ -61,4 +64,22 @@ const naive = create({
 
 document.title = appEnv.title
 
-createApp(App).use(router).use(naive).mount('#wechatHlinkApp')
+const app = createApp(App)
+
+const applyPermission = (el, binding) => {
+  if (!Object.prototype.hasOwnProperty.call(el.dataset, '_permissionDisplay')) {
+    el.dataset._permissionDisplay = el.style.display || ''
+  }
+  el.style.display = resolvePermissionVisible(binding?.value)
+    ? (el.dataset._permissionDisplay || '')
+    : 'none'
+}
+
+app.config.globalProperties.$hasPermission = hasPermission
+app.config.globalProperties.$hasAnyPermission = hasAnyPermission
+app.directive('permission', {
+  mounted: applyPermission,
+  updated: applyPermission
+})
+
+app.use(router).use(naive).mount('#wechatHlinkApp')

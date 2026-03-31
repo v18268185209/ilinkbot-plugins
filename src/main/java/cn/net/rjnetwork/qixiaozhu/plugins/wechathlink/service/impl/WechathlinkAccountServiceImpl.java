@@ -7,6 +7,7 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkLoginSes
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMemberMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkLoginSessionMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAccountService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkClient;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkModels;
@@ -36,6 +37,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
     private final WechathlinkPollerManager pollerManager;
     private final IlinkClient ilinkClient;
     private final WechathlinkRuntimeConfigService runtimeConfigService;
+    private final WechathlinkAuditService auditService;
 
     public WechathlinkAccountServiceImpl(WechathlinkAccountMapper accountMapper,
                                          WechathlinkAccountMemberMapper memberMapper,
@@ -43,7 +45,8 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                                          WechathlinkPermissionService permissionService,
                                          WechathlinkPollerManager pollerManager,
                                          IlinkClient ilinkClient,
-                                         WechathlinkRuntimeConfigService runtimeConfigService) {
+                                         WechathlinkRuntimeConfigService runtimeConfigService,
+                                         WechathlinkAuditService auditService) {
         this.accountMapper = accountMapper;
         this.memberMapper = memberMapper;
         this.loginSessionMapper = loginSessionMapper;
@@ -51,6 +54,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         this.pollerManager = pollerManager;
         this.ilinkClient = ilinkClient;
         this.runtimeConfigService = runtimeConfigService;
+        this.auditService = auditService;
     }
 
     @Override
@@ -109,15 +113,29 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         account.setLoginStatus(defaultValue(asString(body.get("loginStatus")), created ? "CREATED" : account.getLoginStatus(), "CREATED"));
         account.setPollStatus(defaultValue(asString(body.get("pollStatus")), created ? "STOPPED" : account.getPollStatus(), "STOPPED"));
         account.setLastError(asString(body.get("lastError")));
-        if (created) {
-            CurrentAccount current = currentAccount();
-            account.setOwnerUserId(current == null ? null : current.getId());
-            fillCreateAudit(account);
-            accountMapper.insert(account);
-            createDefaultOwnerMembership(account);
-        } else {
-            fillUpdateAudit(account);
-            accountMapper.updateById(account);
+        Map<String, Object> auditPayload = new LinkedHashMap<>();
+        auditPayload.put("id", id);
+        auditPayload.put("accountCode", accountCode);
+        auditPayload.put("accountName", accountName);
+        auditPayload.put("baseUrl", account.getBaseUrl() == null ? "" : account.getBaseUrl());
+        auditPayload.put("created", created);
+        try {
+            if (created) {
+                CurrentAccount current = currentAccount();
+                account.setOwnerUserId(current == null ? null : current.getId());
+                fillCreateAudit(account);
+                accountMapper.insert(account);
+                createDefaultOwnerMembership(account);
+            } else {
+                fillUpdateAudit(account);
+                accountMapper.updateById(account);
+            }
+            auditService.recordSuccess(account.getId(), created ? "ACCOUNT_CREATE" : "ACCOUNT_UPDATE", "ACCOUNT", account.getId(),
+                    created ? "wechat account created" : "wechat account updated", auditPayload);
+        } catch (RuntimeException ex) {
+            auditService.recordFailure(account.getId(), created ? "ACCOUNT_CREATE" : "ACCOUNT_UPDATE", "ACCOUNT", id,
+                    created ? "wechat account create failed" : "wechat account update failed", ex, auditPayload);
+            throw ex;
         }
         return detail(account.getId());
     }
@@ -128,13 +146,26 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         WechathlinkAccount account = getOperableAccount(id);
         account.setStatus(status == null ? 0 : status);
         account.setPollStatus(Integer.valueOf(1).equals(account.getStatus()) ? "RUNNING" : "STOPPED");
-        if (Integer.valueOf(1).equals(account.getStatus())) {
-            pollerManager.start(account.getId());
-        } else {
-            pollerManager.stop(account.getId());
+        Map<String, Object> auditPayload = Map.of(
+                "accountId", account.getId(),
+                "status", account.getStatus(),
+                "pollStatus", account.getPollStatus()
+        );
+        try {
+            if (Integer.valueOf(1).equals(account.getStatus())) {
+                pollerManager.start(account.getId());
+            } else {
+                pollerManager.stop(account.getId());
+            }
+            fillUpdateAudit(account);
+            accountMapper.updateById(account);
+            auditService.recordSuccess(account.getId(), "ACCOUNT_TOGGLE", "ACCOUNT", account.getId(),
+                    "wechat account toggled", auditPayload);
+        } catch (RuntimeException ex) {
+            auditService.recordFailure(account.getId(), "ACCOUNT_TOGGLE", "ACCOUNT", account.getId(),
+                    "wechat account toggle failed", ex, auditPayload);
+            throw ex;
         }
-        fillUpdateAudit(account);
-        accountMapper.updateById(account);
         return detail(account.getId());
     }
 
@@ -153,22 +184,39 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                 .eq(WechathlinkAccountMember::getUserId, userId)
                 .eq(WechathlinkAccountMember::getIsDeleted, 0)
                 .last("LIMIT 1"));
-        if (member == null) {
-            member = new WechathlinkAccountMember();
-            member.setWechatAccountId(wechatAccountId);
-            member.setUserId(userId);
-            member.setRoleCode(roleCode);
-            member.setPermissionScope(defaultValue(asString(body.get("permissionScope")), "FULL", "FULL"));
-            member.setIsPrimaryOwner(0);
-            member.setCompanyId(account.getCompanyId());
-            member.setDeptId(account.getDeptId());
-            fillCreateAudit(member);
-            memberMapper.insert(member);
-        } else {
-            member.setRoleCode(roleCode);
-            member.setPermissionScope(defaultValue(asString(body.get("permissionScope")), member.getPermissionScope(), "FULL"));
-            fillUpdateAudit(member);
-            memberMapper.updateById(member);
+        boolean created = member == null;
+        String permissionScope = defaultValue(asString(body.get("permissionScope")), created ? "FULL" : member.getPermissionScope(), "FULL");
+        Map<String, Object> auditPayload = Map.of(
+                "wechatAccountId", wechatAccountId,
+                "userId", userId,
+                "roleCode", roleCode,
+                "permissionScope", permissionScope
+        );
+        try {
+            if (member == null) {
+                member = new WechathlinkAccountMember();
+                member.setWechatAccountId(wechatAccountId);
+                member.setUserId(userId);
+                member.setRoleCode(roleCode);
+                member.setPermissionScope(permissionScope);
+                member.setIsPrimaryOwner(0);
+                member.setCompanyId(account.getCompanyId());
+                member.setDeptId(account.getDeptId());
+                fillCreateAudit(member);
+                memberMapper.insert(member);
+            } else {
+                member.setRoleCode(roleCode);
+                member.setPermissionScope(permissionScope);
+                fillUpdateAudit(member);
+                memberMapper.updateById(member);
+            }
+            auditService.recordSuccess(wechatAccountId, created ? "ACCOUNT_MEMBER_CREATE" : "ACCOUNT_MEMBER_UPDATE",
+                    "ACCOUNT_MEMBER", member.getId(), created ? "wechat account member created" : "wechat account member updated", auditPayload);
+        } catch (RuntimeException ex) {
+            auditService.recordFailure(wechatAccountId, created ? "ACCOUNT_MEMBER_CREATE" : "ACCOUNT_MEMBER_UPDATE",
+                    "ACCOUNT_MEMBER", member == null ? null : member.getId(),
+                    created ? "wechat account member create failed" : "wechat account member update failed", ex, auditPayload);
+            throw ex;
         }
         return detail(wechatAccountId);
     }

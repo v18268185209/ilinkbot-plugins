@@ -6,7 +6,7 @@
       description="统一维护独立模式与宿主模式下的插件运行配置。"
     >
       <template #actions>
-        <n-button type="primary" @click="settingsModalVisible = true">编辑配置</n-button>
+        <n-button v-permission="'btn:wechathlink_settings:save'" type="primary" @click="settingsModalVisible = true">编辑配置</n-button>
       </template>
     </page-header>
 
@@ -36,7 +36,7 @@
       </n-form>
       <template #footer>
         <n-button @click="settingsModalVisible = false">取消</n-button>
-        <n-button type="primary" @click="saveSettings">保存配置</n-button>
+        <n-button v-permission="'btn:wechathlink_settings:save'" type="primary" @click="saveSettings">保存配置</n-button>
       </template>
     </modal-frame>
   </div>

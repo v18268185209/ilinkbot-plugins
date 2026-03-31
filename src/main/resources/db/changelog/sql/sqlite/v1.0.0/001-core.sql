@@ -119,6 +119,29 @@ CREATE TABLE IF NOT EXISTS wcf_log (
     status INTEGER NOT NULL DEFAULT 1
 );
 
+CREATE TABLE IF NOT EXISTS wcf_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    wechat_account_id INTEGER,
+    operator_user_id INTEGER,
+    operator_user_name TEXT DEFAULT '',
+    action_type TEXT NOT NULL,
+    resource_type TEXT NOT NULL,
+    resource_id TEXT DEFAULT '',
+    result_status TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    detail_json TEXT,
+    create_user_id INTEGER,
+    update_user_id INTEGER,
+    company_id INTEGER,
+    dept_id INTEGER,
+    create_time TEXT NOT NULL,
+    update_time TEXT NOT NULL,
+    is_deleted INTEGER NOT NULL DEFAULT 0,
+    status INTEGER NOT NULL DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_wcf_audit_account_time ON wcf_audit_log(wechat_account_id, create_time);
+CREATE INDEX IF NOT EXISTS idx_wcf_audit_operator_time ON wcf_audit_log(operator_user_id, create_time);
+
 CREATE TABLE IF NOT EXISTS wcf_setting (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     config_group TEXT NOT NULL,
