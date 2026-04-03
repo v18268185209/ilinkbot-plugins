@@ -6,21 +6,22 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.time.LocalDateTime;
-
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("wcf_peer_context")
-public class WechathlinkPeerContext extends WechathlinkAuditEntity {
+@TableName("wcf_message_dispatch")
+public class WechathlinkMessageDispatch extends WechathlinkAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long wechatAccountId;
+    private Long runtimeId;
     private String peerUserId;
-    private String contextToken;
-    private String contextStatus;
-    private LocalDateTime lastMessageAt;
-    private LocalDateTime lastInboundAt;
-    private LocalDateTime replyWindowExpiresAt;
-    private String windowStatus;
+    private String dispatchType;
+    private String payloadJson;
+    private String dispatchStatus;
+    private Integer retryCount;
+    private String errorMessage;
+    private String sourceType;
+    private String sourceId;
+    private String traceId;
 }

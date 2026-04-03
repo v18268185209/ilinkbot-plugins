@@ -150,17 +150,31 @@ public class WechathlinkPermissionBootstrapService {
 
     private List<PageSpec> pageSpecs() {
         return List.of(
-                new PageSpec("微信接入总览", "wechathlink_overview", "/dashboard/plugins/wechathlink/overview", "fas fa-chart-line",
+                new PageSpec("概览", "wechathlink_overview", "/dashboard/plugins/wechathlink/overview", "fas fa-chart-line",
                         List.of("/api/wechathlink/admin/dashboard/summary")),
-                new PageSpec("微信账号管理", "wechathlink_accounts", "/dashboard/plugins/wechathlink/accounts", "fas fa-user-friends",
+                new PageSpec("接入", "wechathlink_accounts", "/dashboard/plugins/wechathlink/accounts", "fas fa-user-friends",
                         List.of("/api/wechathlink/admin/accounts/list", "/api/wechathlink/admin/accounts/detail")),
-                new PageSpec("事件中心", "wechathlink_events", "/dashboard/plugins/wechathlink/events", "fas fa-stream",
-                        List.of("/api/wechathlink/admin/events/summary", "/api/wechathlink/admin/events/list", "/api/wechathlink/admin/events/contacts")),
-                new PageSpec("消息发送", "wechathlink_messages", "/dashboard/plugins/wechathlink/messages", "fas fa-paper-plane",
+                new PageSpec("会话", "wechathlink_messages", "/dashboard/plugins/wechathlink/messages", "fas fa-paper-plane",
                         List.of("/api/wechathlink/admin/messages/peers", "/api/wechathlink/admin/events/list")),
-                new PageSpec("审计中心", "wechathlink_audits", "/dashboard/plugins/wechathlink/audits", "fas fa-clipboard-list",
+                new PageSpec("追踪", "wechathlink_events", "/dashboard/plugins/wechathlink/events", "fas fa-stream",
+                        List.of(
+                                "/api/wechathlink/admin/events/summary",
+                                "/api/wechathlink/admin/events/list",
+                                "/api/wechathlink/admin/events/contacts",
+                                "/api/wechathlink/admin/events/dispatches",
+                                "/api/wechathlink/admin/events/media-assets"
+                        )),
+                new PageSpec("审计", "wechathlink_audits", "/dashboard/plugins/wechathlink/audits", "fas fa-clipboard-list",
                         List.of("/api/wechathlink/admin/audit/list")),
-                new PageSpec("设置中心", "wechathlink_settings", "/dashboard/plugins/wechathlink/settings", "fas fa-cogs",
+                new PageSpec("开放", "wechathlink_platform", "/dashboard/plugins/wechathlink/platform", "fas fa-plug",
+                        List.of(
+                                "/api/wechathlink/admin/platform/summary",
+                                "/api/wechathlink/admin/platform/requests",
+                                "/api/wechathlink/admin/platform/deliveries",
+                                "/api/wechathlink/admin/platform/deliveries/detail",
+                                "/api/wechathlink/admin/platform/deliveries/retry"
+                        )),
+                new PageSpec("配置", "wechathlink_settings", "/dashboard/plugins/wechathlink/settings", "fas fa-cogs",
                         List.of("/api/wechathlink/admin/settings/get"))
         );
     }
@@ -174,6 +188,7 @@ public class WechathlinkPermissionBootstrapService {
                 new ButtonSpec("刷新登录状态", "btn:wechathlink_accounts:loginstatus", "wechathlink_accounts", List.of("/api/wechathlink/admin/login/status")),
                 new ButtonSpec("导出事件", "btn:wechathlink_events:export", "wechathlink_events", List.of("/api/wechathlink/admin/events/export")),
                 new ButtonSpec("查看事件媒体", "btn:wechathlink_events:media", "wechathlink_events", List.of("/api/wechathlink/admin/events/media")),
+                new ButtonSpec("重试分发", "btn:wechathlink_events:retrydispatch", "wechathlink_events", List.of("/api/wechathlink/admin/messages/retry-dispatch")),
                 new ButtonSpec("上传文件", "btn:wechathlink_messages:upload", "wechathlink_messages", List.of("/api/wechathlink/admin/messages/upload")),
                 new ButtonSpec("发送文本", "btn:wechathlink_messages:sendtext", "wechathlink_messages", List.of("/api/wechathlink/admin/messages/send-text")),
                 new ButtonSpec("发送媒体", "btn:wechathlink_messages:sendmedia", "wechathlink_messages", List.of("/api/wechathlink/admin/messages/send-media")),

@@ -6,21 +6,21 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.time.LocalDateTime;
-
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("wcf_peer_context")
-public class WechathlinkPeerContext extends WechathlinkAuditEntity {
+@TableName("wcf_media_asset")
+public class WechathlinkMediaAsset extends WechathlinkAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
     private Long wechatAccountId;
-    private String peerUserId;
-    private String contextToken;
-    private String contextStatus;
-    private LocalDateTime lastMessageAt;
-    private LocalDateTime lastInboundAt;
-    private LocalDateTime replyWindowExpiresAt;
-    private String windowStatus;
+    private Long eventId;
+    private Long dispatchId;
+    private String assetType;
+    private String storagePath;
+    private String fileName;
+    private String mimeType;
+    private String sha256;
+    private String downloadStatus;
+    private String errorMessage;
 }

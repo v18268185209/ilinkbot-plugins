@@ -12,4 +12,6 @@ public interface WechathlinkMessageService {
     Map<String, Object> sendText(Map<String, Object> body);
 
     Map<String, Object> sendMedia(Map<String, Object> body);
+
+    Map<String, Object> retryDispatch(Long dispatchId);
 }

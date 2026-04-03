@@ -2,12 +2,17 @@ package cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.impl;
 
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccount;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkEvent;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkMediaAsset;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkMessageDispatch;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkPeerContext;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkEventMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkMediaAssetMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkMessageDispatchMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkPeerContextMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkEventService;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.WechathlinkReplyWindowSupport;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.stereotype.Service;
@@ -19,26 +24,34 @@ import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Service
 public class WechathlinkEventServiceImpl implements WechathlinkEventService {
 
     private final WechathlinkAccountMapper accountMapper;
     private final WechathlinkEventMapper eventMapper;
+    private final WechathlinkMessageDispatchMapper messageDispatchMapper;
+    private final WechathlinkMediaAssetMapper mediaAssetMapper;
     private final WechathlinkPeerContextMapper peerContextMapper;
     private final WechathlinkPermissionService permissionService;
     private final WechathlinkAuditService auditService;
 
     public WechathlinkEventServiceImpl(WechathlinkAccountMapper accountMapper,
                                        WechathlinkEventMapper eventMapper,
+                                       WechathlinkMessageDispatchMapper messageDispatchMapper,
+                                       WechathlinkMediaAssetMapper mediaAssetMapper,
                                        WechathlinkPeerContextMapper peerContextMapper,
                                        WechathlinkPermissionService permissionService,
                                        WechathlinkAuditService auditService) {
         this.accountMapper = accountMapper;
         this.eventMapper = eventMapper;
+        this.messageDispatchMapper = messageDispatchMapper;
+        this.mediaAssetMapper = mediaAssetMapper;
         this.peerContextMapper = peerContextMapper;
         this.permissionService = permissionService;
         this.auditService = auditService;
@@ -74,6 +87,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
 
     @Override
     public Map<String, Object> list(Long wechatAccountId,
+                                    Long eventId,
                                     String contactId,
                                     String direction,
                                     String eventType,
@@ -86,6 +100,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         Page<WechathlinkEvent> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
         LambdaQueryWrapper<WechathlinkEvent> wrapper = buildEventQuery(
                 wechatAccountId,
+                eventId,
                 contactId,
                 direction,
                 eventType,
@@ -127,6 +142,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         try {
             LambdaQueryWrapper<WechathlinkEvent> wrapper = buildEventQuery(
                     wechatAccountId,
+                    null,
                     contactId,
                     direction,
                     eventType,
@@ -186,7 +202,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
                     int compare = right.compareTo(left);
                     return compare != 0 ? compare : a.contactId().compareTo(b.contactId());
                 })
-                .map(item -> item.toView(peerContextMap.containsKey(item.contactId())))
+                .map(item -> item.toView(peerContextMap.get(item.contactId())))
                 .toList();
         int page = normalizePageNum(pageNum);
         int size = normalizePageSize(pageSize);
@@ -199,6 +215,62 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
                 "pageNum", (long) page,
                 "pageSize", (long) size
         );
+    }
+
+    @Override
+    public Map<String, Object> dispatches(Long wechatAccountId,
+                                          Long dispatchId,
+                                          String contactId,
+                                          String dispatchType,
+                                          String dispatchStatus,
+                                          String traceId,
+                                          String keyword,
+                                          Integer pageNum,
+                                          Integer pageSize) {
+        Page<WechathlinkMessageDispatch> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
+        LambdaQueryWrapper<WechathlinkMessageDispatch> wrapper = buildDispatchQuery(
+                wechatAccountId,
+                dispatchId,
+                contactId,
+                dispatchType,
+                dispatchStatus,
+                traceId,
+                keyword
+        );
+        if (wrapper == null) {
+            return pageResult(List.of(), 0L, page);
+        }
+        wrapper.orderByDesc(WechathlinkMessageDispatch::getCreateTime).orderByDesc(WechathlinkMessageDispatch::getId);
+        Page<WechathlinkMessageDispatch> result = messageDispatchMapper.selectPage(page, wrapper);
+        return pageResult(toDispatchViews(result.getRecords()), result.getTotal(), result);
+    }
+
+    @Override
+    public Map<String, Object> mediaAssets(Long wechatAccountId,
+                                           Long assetId,
+                                           Long eventId,
+                                           Long dispatchId,
+                                           String assetType,
+                                           String downloadStatus,
+                                           String keyword,
+                                           Integer pageNum,
+                                           Integer pageSize) {
+        Page<WechathlinkMediaAsset> page = new Page<>(normalizePageNum(pageNum), normalizePageSize(pageSize));
+        LambdaQueryWrapper<WechathlinkMediaAsset> wrapper = buildMediaAssetQuery(
+                wechatAccountId,
+                assetId,
+                eventId,
+                dispatchId,
+                assetType,
+                downloadStatus,
+                keyword
+        );
+        if (wrapper == null) {
+            return pageResult(List.of(), 0L, page);
+        }
+        wrapper.orderByDesc(WechathlinkMediaAsset::getCreateTime).orderByDesc(WechathlinkMediaAsset::getId);
+        Page<WechathlinkMediaAsset> result = mediaAssetMapper.selectPage(page, wrapper);
+        return pageResult(toMediaAssetViews(result.getRecords()), result.getTotal(), result);
     }
 
     @Override
@@ -215,6 +287,97 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
             throw new IllegalArgumentException("event not found or no permission");
         }
         return event;
+    }
+
+    private List<Map<String, Object>> toDispatchViews(List<WechathlinkMessageDispatch> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, WechathlinkAccount> accountMap = loadAccountMap(rows.stream()
+                .map(WechathlinkMessageDispatch::getWechatAccountId)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        Set<Long> eventIds = rows.stream()
+                .filter(item -> "EVENT".equalsIgnoreCase(defaultValue(item.getSourceType(), "")))
+                .map(item -> parseLongValue(item.getSourceId()))
+                .filter(value -> value != null && value > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        Map<Long, WechathlinkEvent> eventMap = loadEventMap(eventIds);
+        Map<Long, Long> mediaAssetCountMap = loadMediaAssetCountByDispatchId(rows.stream()
+                .map(WechathlinkMessageDispatch::getId)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        return rows.stream().map((item) -> {
+            WechathlinkAccount account = accountMap.get(item.getWechatAccountId());
+            Long sourceEventId = "EVENT".equalsIgnoreCase(defaultValue(item.getSourceType(), "")) ? parseLongValue(item.getSourceId()) : null;
+            WechathlinkEvent event = sourceEventId == null ? null : eventMap.get(sourceEventId);
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("id", item.getId());
+            payload.put("wechatAccountId", item.getWechatAccountId());
+            payload.put("accountCode", account == null ? "" : defaultValue(account.getAccountCode(), ""));
+            payload.put("accountName", account == null ? "" : defaultValue(account.getAccountName(), ""));
+            payload.put("runtimeId", item.getRuntimeId());
+            payload.put("peerUserId", item.getPeerUserId());
+            payload.put("dispatchType", item.getDispatchType());
+            payload.put("payloadJson", item.getPayloadJson());
+            payload.put("dispatchStatus", item.getDispatchStatus());
+            payload.put("retryCount", item.getRetryCount());
+            payload.put("errorMessage", item.getErrorMessage());
+            payload.put("sourceType", item.getSourceType());
+            payload.put("sourceId", item.getSourceId());
+            payload.put("traceId", item.getTraceId());
+            payload.put("eventId", sourceEventId);
+            payload.put("eventType", event == null ? "" : defaultValue(event.getEventType(), ""));
+            payload.put("eventDirection", event == null ? "" : defaultValue(event.getDirection(), ""));
+            payload.put("eventCreateTime", event == null ? null : event.getCreateTime());
+            payload.put("mediaAssetCount", mediaAssetCountMap.getOrDefault(item.getId(), 0L));
+            payload.put("createTime", item.getCreateTime());
+            payload.put("updateTime", item.getUpdateTime());
+            return payload;
+        }).toList();
+    }
+
+    private List<Map<String, Object>> toMediaAssetViews(List<WechathlinkMediaAsset> rows) {
+        if (rows == null || rows.isEmpty()) {
+            return List.of();
+        }
+        Map<Long, WechathlinkAccount> accountMap = loadAccountMap(rows.stream()
+                .map(WechathlinkMediaAsset::getWechatAccountId)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        Map<Long, WechathlinkEvent> eventMap = loadEventMap(rows.stream()
+                .map(WechathlinkMediaAsset::getEventId)
+                .filter(value -> value != null && value > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        Map<Long, WechathlinkMessageDispatch> dispatchMap = loadDispatchMap(rows.stream()
+                .map(WechathlinkMediaAsset::getDispatchId)
+                .filter(value -> value != null && value > 0)
+                .collect(Collectors.toCollection(LinkedHashSet::new)));
+        return rows.stream().map((item) -> {
+            WechathlinkAccount account = accountMap.get(item.getWechatAccountId());
+            WechathlinkEvent event = item.getEventId() == null ? null : eventMap.get(item.getEventId());
+            WechathlinkMessageDispatch dispatch = item.getDispatchId() == null ? null : dispatchMap.get(item.getDispatchId());
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("id", item.getId());
+            payload.put("wechatAccountId", item.getWechatAccountId());
+            payload.put("accountCode", account == null ? "" : defaultValue(account.getAccountCode(), ""));
+            payload.put("accountName", account == null ? "" : defaultValue(account.getAccountName(), ""));
+            payload.put("eventId", item.getEventId());
+            payload.put("dispatchId", item.getDispatchId());
+            payload.put("assetType", item.getAssetType());
+            payload.put("storagePath", item.getStoragePath());
+            payload.put("fileName", item.getFileName());
+            payload.put("mimeType", item.getMimeType());
+            payload.put("sha256", item.getSha256());
+            payload.put("downloadStatus", item.getDownloadStatus());
+            payload.put("errorMessage", item.getErrorMessage());
+            payload.put("eventType", event == null ? "" : defaultValue(event.getEventType(), ""));
+            payload.put("eventDirection", event == null ? "" : defaultValue(event.getDirection(), ""));
+            payload.put("dispatchStatus", dispatch == null ? "" : defaultValue(dispatch.getDispatchStatus(), ""));
+            payload.put("traceId", dispatch == null ? "" : defaultValue(dispatch.getTraceId(), ""));
+            payload.put("peerUserId", dispatch == null ? resolvePeerUserId(event, account) : defaultValue(dispatch.getPeerUserId(), resolvePeerUserId(event, account)));
+            payload.put("canPreview", event != null && StringUtils.hasText(event.getMediaPath()));
+            payload.put("createTime", item.getCreateTime());
+            payload.put("updateTime", item.getUpdateTime());
+            return payload;
+        }).toList();
     }
 
     private Map<String, Object> toSummaryView(WechathlinkAccount account) {
@@ -288,7 +451,207 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         return account;
     }
 
+    private WechathlinkAccount requireMediaReadableAccount(Long wechatAccountId) {
+        WechathlinkAccount account = accountMapper.selectById(wechatAccountId);
+        if (account == null || !permissionService.canViewMedia(account)) {
+            throw new IllegalArgumentException("wechat account not found or no permission");
+        }
+        return account;
+    }
+
+    private LambdaQueryWrapper<WechathlinkMessageDispatch> buildDispatchQuery(Long wechatAccountId,
+                                                                              Long dispatchId,
+                                                                              String contactId,
+                                                                              String dispatchType,
+                                                                              String dispatchStatus,
+                                                                              String traceId,
+                                                                              String keyword) {
+        if (wechatAccountId != null) {
+            requireReadableAccount(wechatAccountId);
+        }
+        LambdaQueryWrapper<WechathlinkMessageDispatch> wrapper = new LambdaQueryWrapper<WechathlinkMessageDispatch>()
+                .eq(WechathlinkMessageDispatch::getIsDeleted, 0);
+        Set<Long> accountIds = permissionService.readableAccountIds();
+        if (!permissionService.standaloneMode() && !permissionService.superAccount() && wechatAccountId == null) {
+            if (accountIds.isEmpty()) {
+                return null;
+            }
+            wrapper.in(WechathlinkMessageDispatch::getWechatAccountId, accountIds);
+        }
+        if (wechatAccountId != null) {
+            wrapper.eq(WechathlinkMessageDispatch::getWechatAccountId, wechatAccountId);
+        }
+        if (dispatchId != null) {
+            wrapper.eq(WechathlinkMessageDispatch::getId, dispatchId);
+        }
+        if (StringUtils.hasText(contactId)) {
+            wrapper.eq(WechathlinkMessageDispatch::getPeerUserId, contactId.trim());
+        }
+        if (StringUtils.hasText(dispatchType)) {
+            wrapper.eq(WechathlinkMessageDispatch::getDispatchType, dispatchType.trim());
+        }
+        if (StringUtils.hasText(dispatchStatus)) {
+            wrapper.eq(WechathlinkMessageDispatch::getDispatchStatus, dispatchStatus.trim());
+        }
+        if (StringUtils.hasText(traceId)) {
+            wrapper.like(WechathlinkMessageDispatch::getTraceId, traceId.trim());
+        }
+        if (StringUtils.hasText(keyword)) {
+            String normalizedKeyword = keyword.trim();
+            wrapper.and(w -> w.like(WechathlinkMessageDispatch::getPayloadJson, normalizedKeyword)
+                    .or().like(WechathlinkMessageDispatch::getErrorMessage, normalizedKeyword)
+                    .or().like(WechathlinkMessageDispatch::getSourceId, normalizedKeyword)
+                    .or().like(WechathlinkMessageDispatch::getPeerUserId, normalizedKeyword));
+        }
+        return wrapper;
+    }
+
+    private LambdaQueryWrapper<WechathlinkMediaAsset> buildMediaAssetQuery(Long wechatAccountId,
+                                                                           Long assetId,
+                                                                           Long eventId,
+                                                                           Long dispatchId,
+                                                                           String assetType,
+                                                                           String downloadStatus,
+                                                                           String keyword) {
+        Long resolvedAccountId = wechatAccountId;
+        if (eventId != null && eventId > 0) {
+            WechathlinkEvent event = getReadableEvent(eventId);
+            resolvedAccountId = resolvedAccountId == null ? event.getWechatAccountId() : resolvedAccountId;
+        }
+        if (dispatchId != null && dispatchId > 0) {
+            WechathlinkMessageDispatch dispatch = messageDispatchMapper.selectById(dispatchId);
+            if (dispatch == null || dispatch.getWechatAccountId() == null) {
+                throw new IllegalArgumentException("dispatch not found");
+            }
+            requireReadableAccount(dispatch.getWechatAccountId());
+            resolvedAccountId = resolvedAccountId == null ? dispatch.getWechatAccountId() : resolvedAccountId;
+        }
+        if (resolvedAccountId != null) {
+            requireMediaReadableAccount(resolvedAccountId);
+        }
+        LambdaQueryWrapper<WechathlinkMediaAsset> wrapper = new LambdaQueryWrapper<WechathlinkMediaAsset>()
+                .eq(WechathlinkMediaAsset::getIsDeleted, 0);
+        Set<Long> accountIds = mediaReadableAccountIds();
+        if (!permissionService.standaloneMode() && !permissionService.superAccount() && resolvedAccountId == null) {
+            if (accountIds.isEmpty()) {
+                return null;
+            }
+            wrapper.in(WechathlinkMediaAsset::getWechatAccountId, accountIds);
+        }
+        if (resolvedAccountId != null) {
+            wrapper.eq(WechathlinkMediaAsset::getWechatAccountId, resolvedAccountId);
+        }
+        if (assetId != null) {
+            wrapper.eq(WechathlinkMediaAsset::getId, assetId);
+        }
+        if (eventId != null) {
+            wrapper.eq(WechathlinkMediaAsset::getEventId, eventId);
+        }
+        if (dispatchId != null) {
+            wrapper.eq(WechathlinkMediaAsset::getDispatchId, dispatchId);
+        }
+        if (StringUtils.hasText(assetType)) {
+            wrapper.eq(WechathlinkMediaAsset::getAssetType, assetType.trim());
+        }
+        if (StringUtils.hasText(downloadStatus)) {
+            wrapper.eq(WechathlinkMediaAsset::getDownloadStatus, downloadStatus.trim());
+        }
+        if (StringUtils.hasText(keyword)) {
+            String normalizedKeyword = keyword.trim();
+            wrapper.and(w -> w.like(WechathlinkMediaAsset::getFileName, normalizedKeyword)
+                    .or().like(WechathlinkMediaAsset::getStoragePath, normalizedKeyword)
+                    .or().like(WechathlinkMediaAsset::getSha256, normalizedKeyword)
+                    .or().like(WechathlinkMediaAsset::getErrorMessage, normalizedKeyword));
+        }
+        return wrapper;
+    }
+
+    private Map<Long, WechathlinkAccount> loadAccountMap(Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        return accountMapper.selectBatchIds(ids).stream()
+                .collect(Collectors.toMap(WechathlinkAccount::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
+    }
+
+    private Map<Long, WechathlinkEvent> loadEventMap(Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        return eventMapper.selectBatchIds(ids).stream()
+                .collect(Collectors.toMap(WechathlinkEvent::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
+    }
+
+    private Map<Long, WechathlinkMessageDispatch> loadDispatchMap(Set<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Map.of();
+        }
+        return messageDispatchMapper.selectBatchIds(ids).stream()
+                .collect(Collectors.toMap(WechathlinkMessageDispatch::getId, item -> item, (left, right) -> left, LinkedHashMap::new));
+    }
+
+    private Map<Long, Long> loadMediaAssetCountByDispatchId(Set<Long> dispatchIds) {
+        if (dispatchIds == null || dispatchIds.isEmpty()) {
+            return Map.of();
+        }
+        return mediaAssetMapper.selectList(new LambdaQueryWrapper<WechathlinkMediaAsset>()
+                        .in(WechathlinkMediaAsset::getDispatchId, dispatchIds)
+                        .eq(WechathlinkMediaAsset::getIsDeleted, 0))
+                .stream()
+                .filter(item -> item.getDispatchId() != null)
+                .collect(Collectors.groupingBy(WechathlinkMediaAsset::getDispatchId, LinkedHashMap::new, Collectors.counting()));
+    }
+
+    private Set<Long> mediaReadableAccountIds() {
+        if (permissionService.standaloneMode() || permissionService.superAccount()) {
+            return Set.of();
+        }
+        return accountMapper.selectList(new LambdaQueryWrapper<WechathlinkAccount>()
+                        .eq(WechathlinkAccount::getIsDeleted, 0))
+                .stream()
+                .filter(permissionService::canViewMedia)
+                .map(WechathlinkAccount::getId)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+    }
+
+    private Long parseLongValue(String value) {
+        if (!StringUtils.hasText(value)) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String defaultValue(String value, String fallback) {
+        return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private String resolvePeerUserId(WechathlinkEvent event, WechathlinkAccount account) {
+        if (event == null) {
+            return "";
+        }
+        String accountCode = account == null ? "" : defaultValue(account.getAccountCode(), "");
+        String from = defaultValue(event.getFromUserId(), "");
+        String to = defaultValue(event.getToUserId(), "");
+        if (StringUtils.hasText(accountCode)) {
+            if (StringUtils.hasText(from) && !accountCode.equals(from) && accountCode.equals(to)) {
+                return from;
+            }
+            if (StringUtils.hasText(to) && !accountCode.equals(to) && accountCode.equals(from)) {
+                return to;
+            }
+        }
+        if ("outbound".equalsIgnoreCase(defaultValue(event.getDirection(), ""))) {
+            return StringUtils.hasText(to) ? to : from;
+        }
+        return StringUtils.hasText(from) ? from : to;
+    }
+
     private LambdaQueryWrapper<WechathlinkEvent> buildEventQuery(Long wechatAccountId,
+                                                                 Long eventId,
                                                                  String contactId,
                                                                  String direction,
                                                                  String eventType,
@@ -313,6 +676,9 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
         }
         if (wechatAccountId != null) {
             wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
+        }
+        if (eventId != null) {
+            wrapper.eq(WechathlinkEvent::getId, eventId);
         }
         if (StringUtils.hasText(contactId)) {
             String target = contactId.trim();
@@ -468,7 +834,16 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
             }
         }
 
-        private Map<String, Object> toView(boolean hasContextToken) {
+        private Map<String, Object> toView(WechathlinkPeerContext peerContext) {
+            LocalDateTime lastInboundAt = peerContext == null ? null : (peerContext.getLastInboundAt() == null ? peerContext.getLastMessageAt() : peerContext.getLastInboundAt());
+            LocalDateTime replyWindowExpiresAt = peerContext == null
+                    ? null
+                    : (peerContext.getReplyWindowExpiresAt() == null
+                    ? WechathlinkReplyWindowSupport.calculateReplyWindowExpiresAt(lastInboundAt)
+                    : peerContext.getReplyWindowExpiresAt());
+            String windowStatus = WechathlinkReplyWindowSupport.resolveWindowStatus(replyWindowExpiresAt);
+            String contextStatus = WechathlinkReplyWindowSupport.resolveContextStatus(peerContext == null ? null : peerContext.getContextToken(), replyWindowExpiresAt);
+            boolean canReply = WechathlinkReplyWindowSupport.canReply(peerContext == null ? null : peerContext.getContextToken(), contextStatus, windowStatus);
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("contactId", contactId);
             payload.put("senderCount", senderCount);
@@ -478,7 +853,12 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
             payload.put("lastDirection", lastDirection);
             payload.put("lastEventType", lastEventType);
             payload.put("lastMessagePreview", lastMessagePreview);
-            payload.put("hasContextToken", hasContextToken);
+            payload.put("hasContextToken", canReply);
+            payload.put("canReply", canReply);
+            payload.put("contextStatus", contextStatus);
+            payload.put("lastInboundAt", lastInboundAt);
+            payload.put("replyWindowExpiresAt", replyWindowExpiresAt);
+            payload.put("windowStatus", windowStatus);
             payload.put("label", buildLabel());
             return payload;
         }

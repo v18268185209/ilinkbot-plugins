@@ -8,6 +8,7 @@ public interface WechathlinkEventService {
     Map<String, Object> summary(String keyword, Integer pageNum, Integer pageSize);
 
     Map<String, Object> list(Long wechatAccountId,
+                            Long eventId,
                             String contactId,
                             String direction,
                             String eventType,
@@ -28,6 +29,26 @@ public interface WechathlinkEventService {
                   Integer hasMedia);
 
     Map<String, Object> contacts(Long wechatAccountId, String keyword, Integer pageNum, Integer pageSize);
+
+    Map<String, Object> dispatches(Long wechatAccountId,
+                                   Long dispatchId,
+                                   String contactId,
+                                   String dispatchType,
+                                   String dispatchStatus,
+                                   String traceId,
+                                   String keyword,
+                                   Integer pageNum,
+                                   Integer pageSize);
+
+    Map<String, Object> mediaAssets(Long wechatAccountId,
+                                    Long assetId,
+                                    Long eventId,
+                                    Long dispatchId,
+                                    String assetType,
+                                    String downloadStatus,
+                                    String keyword,
+                                    Integer pageNum,
+                                    Integer pageSize);
 
     WechathlinkEvent getReadableEvent(Long eventId);
 }

@@ -1,16 +1,30 @@
 <template>
-  <div class="page">
+  <div class="page page--settings">
     <page-header
-      kicker="设置"
-      title="运行设置中心"
-      description="统一维护独立模式与宿主模式下的插件运行配置。"
+      kicker="配置"
+      title="系统配置工作台"
+      description="集中管理独立模式与插件模式下的运行参数、接入链路、媒体目录和回调入口。"
     >
       <template #actions>
         <n-button v-permission="'btn:wechathlink_settings:save'" type="primary" @click="settingsModalVisible = true">编辑配置</n-button>
       </template>
     </page-header>
 
-    <n-card title="基础配置">
+    <section class="settings-grid">
+      <article v-for="item in settingGroups" :key="item.key" class="settings-card">
+        <span class="settings-card__kicker">{{ item.kicker }}</span>
+        <strong>{{ item.label }}</strong>
+        <p>{{ item.description }}</p>
+        <div class="settings-card__rows">
+          <div v-for="row in item.rows" :key="row.key" class="settings-card__row">
+            <span>{{ row.key }}</span>
+            <strong>{{ row.value }}</strong>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <n-card title="当前配置明细">
       <n-data-table :columns="columns" :data="rows" :pagination="false" />
     </n-card>
 
@@ -45,9 +59,9 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import api from '../../api.js'
-import PageHeader from '../../components/PageHeader.vue'
 import FieldHint from '../../components/FieldHint.vue'
 import ModalFrame from '../../components/ModalFrame.vue'
+import PageHeader from '../../components/PageHeader.vue'
 
 const form = reactive({
   runMode: '',
@@ -68,6 +82,48 @@ const rows = computed(() => [
   { key: '轮询超时(ms)', value: form.pollTimeoutMs || '-' },
   { key: '媒体目录', value: form.mediaDir || '-' },
   { key: '回调地址', value: form.webhookUrl || '-' }
+])
+
+const settingGroups = computed(() => [
+  {
+    key: 'runtime',
+    kicker: 'Runtime',
+    label: '运行环境',
+    description: '决定插件当前是独立运行还是挂载到宿主环境，并展示监听入口。',
+    rows: [
+      { key: '运行模式', value: 运行模式文本(form.runMode) },
+      { key: '监听地址', value: form.listenAddr || '-' }
+    ]
+  },
+  {
+    key: 'access',
+    kicker: 'Access',
+    label: '协议接入',
+    description: '维护默认 iLink 接入地址和 CDN 链路，直接影响登录、发送和媒体收发。',
+    rows: [
+      { key: '默认接入地址', value: form.defaultBaseUrl || '-' },
+      { key: 'CDN 地址', value: form.cdnBaseUrl || '-' }
+    ]
+  },
+  {
+    key: 'polling',
+    kicker: 'Polling',
+    label: '轮询与回调',
+    description: '控制收消息超时与回调出口，影响消息接收时延和对外联动。',
+    rows: [
+      { key: '轮询超时(ms)', value: form.pollTimeoutMs || '-' },
+      { key: '回调地址', value: form.webhookUrl || '-' }
+    ]
+  },
+  {
+    key: 'media',
+    kicker: 'Media',
+    label: '媒体落地',
+    description: '确定媒体文件的本地落盘目录，支撑媒体查看、资产留痕和后续治理。',
+    rows: [
+      { key: '媒体目录', value: form.mediaDir || '-' }
+    ]
+  }
 ])
 
 const columns = [
@@ -94,3 +150,74 @@ async function saveSettings() {
 
 onMounted(loadSettings)
 </script>
+
+<style scoped>
+.page--settings {
+  gap: 20px;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.05);
+}
+
+.settings-card__kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0f766e;
+}
+
+.settings-card strong {
+  font-size: 22px;
+}
+
+.settings-card p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.65;
+}
+
+.settings-card__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: auto;
+}
+
+.settings-card__row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #f8fafc;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.settings-card__row span {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.settings-card__row strong {
+  font-size: 15px;
+  line-height: 1.55;
+  word-break: break-all;
+}
+</style>

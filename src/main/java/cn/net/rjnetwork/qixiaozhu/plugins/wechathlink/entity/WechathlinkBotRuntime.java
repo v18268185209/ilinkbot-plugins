@@ -10,24 +10,22 @@ import java.time.LocalDateTime;
 
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("wcf_wechat_account")
-public class WechathlinkAccount extends WechathlinkAuditEntity {
+@TableName("wcf_bot_runtime")
+public class WechathlinkBotRuntime extends WechathlinkAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String accountCode;
-    private String accountName;
+    private Long wechatAccountId;
+    private String runtimeType;
     private String baseUrl;
     private String botToken;
     private String ilinkUserId;
-    private String loginStatus;
-    private String pollStatus;
+    private String runtimeStatus;
+    private LocalDateTime expiresAt;
+    private LocalDateTime lastHeartbeatAt;
+    private LocalDateTime lastOnlineAt;
+    private LocalDateTime lastOfflineAt;
+    private Long replaceByRuntimeId;
+    private Integer isActive;
     private String lastError;
-    private String getUpdatesBuf;
-    private LocalDateTime lastPollAt;
-    private LocalDateTime lastInboundAt;
-    private Long ownerUserId;
-    private String bindStatus;
-    private Long currentRuntimeId;
-    private LocalDateTime lastBindAt;
 }

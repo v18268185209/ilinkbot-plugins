@@ -19,6 +19,7 @@ export const appEnv = Object.freeze({
   mode: import.meta.env.MODE,
   isDev: import.meta.env.DEV,
   isProd: import.meta.env.PROD,
+  shellMode: `${import.meta.env.VITE_SHELL_MODE || 'auto'}`.trim().toLowerCase(),
   title: import.meta.env.VITE_APP_TITLE || 'wechat-hlink-plugins-ui',
   apiBaseUrl: normalizeBaseUrl(import.meta.env.VITE_API_BASE_URL, '/api'),
   publicBase: import.meta.env.VITE_PUBLIC_BASE || import.meta.env.BASE_URL || '/',

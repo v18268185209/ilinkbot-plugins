@@ -3,9 +3,11 @@ package cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.impl;
 import cn.net.rjnetwork.qixiaozhu.account.CurrentAccount;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccount;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccountMember;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkBotRuntime;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkLoginSession;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMemberMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkBotRuntimeMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkLoginSessionMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAccountService;
@@ -32,6 +34,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
 
     private final WechathlinkAccountMapper accountMapper;
     private final WechathlinkAccountMemberMapper memberMapper;
+    private final WechathlinkBotRuntimeMapper botRuntimeMapper;
     private final WechathlinkLoginSessionMapper loginSessionMapper;
     private final WechathlinkPermissionService permissionService;
     private final WechathlinkPollerManager pollerManager;
@@ -41,6 +44,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
 
     public WechathlinkAccountServiceImpl(WechathlinkAccountMapper accountMapper,
                                          WechathlinkAccountMemberMapper memberMapper,
+                                         WechathlinkBotRuntimeMapper botRuntimeMapper,
                                          WechathlinkLoginSessionMapper loginSessionMapper,
                                          WechathlinkPermissionService permissionService,
                                          WechathlinkPollerManager pollerManager,
@@ -49,6 +53,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                                          WechathlinkAuditService auditService) {
         this.accountMapper = accountMapper;
         this.memberMapper = memberMapper;
+        this.botRuntimeMapper = botRuntimeMapper;
         this.loginSessionMapper = loginSessionMapper;
         this.permissionService = permissionService;
         this.pollerManager = pollerManager;
@@ -88,6 +93,11 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                 .eq(WechathlinkLoginSession::getWechatAccountId, id)
                 .orderByDesc(WechathlinkLoginSession::getCreateTime)
                 .last("LIMIT 5")));
+        payload.put("runtimes", botRuntimeMapper.selectList(new LambdaQueryWrapper<WechathlinkBotRuntime>()
+                .eq(WechathlinkBotRuntime::getWechatAccountId, id)
+                .eq(WechathlinkBotRuntime::getIsDeleted, 0)
+                .orderByDesc(WechathlinkBotRuntime::getCreateTime)
+                .last("LIMIT 10")));
         return payload;
     }
 
@@ -112,6 +122,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         account.setIlinkUserId(asString(body.get("ilinkUserId")));
         account.setLoginStatus(defaultValue(asString(body.get("loginStatus")), created ? "CREATED" : account.getLoginStatus(), "CREATED"));
         account.setPollStatus(defaultValue(asString(body.get("pollStatus")), created ? "STOPPED" : account.getPollStatus(), "STOPPED"));
+        account.setBindStatus(defaultValue(asString(body.get("bindStatus")), created ? "UNBOUND" : account.getBindStatus(), "UNBOUND"));
         account.setLastError(asString(body.get("lastError")));
         Map<String, Object> auditPayload = new LinkedHashMap<>();
         auditPayload.put("id", id);
@@ -224,10 +235,12 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
     @Override
     @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> startLogin(Map<String, Object> body) {
+        Long wechatAccountId = body == null ? null : asLong(body.get("wechatAccountId"));
+        WechathlinkAccount account = wechatAccountId == null ? null : getOperableAccount(wechatAccountId);
         String baseUrl = body == null ? null : asString(body.get("baseUrl"));
         var runtime = runtimeConfigService.current();
         if (!StringUtils.hasText(baseUrl)) {
-            baseUrl = runtime.defaultBaseUrl();
+            baseUrl = account != null && StringUtils.hasText(account.getBaseUrl()) ? account.getBaseUrl() : runtime.defaultBaseUrl();
         }
         IlinkModels.QrCodeResponse qrCodeResponse = ilinkClient.fetchQrCode(baseUrl, runtime.pollTimeoutMs());
         String qrCodeTicket = requireText(qrCodeResponse == null ? null : qrCodeResponse.qrcode(), "ilink qrcode is empty");
@@ -242,6 +255,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         session.setQrCodeContent(qrCodeContent);
         session.setQrCodeUrl(buildLoginQrUrl(sessionCode, qrCodeTicket));
         session.setSessionStatus("WAIT_SCAN");
+        session.setWechatAccountId(account == null ? null : account.getId());
         session.setExpiredAt(LocalDateTime.now().plusMinutes(10));
         fillCreateAudit(session);
         loginSessionMapper.insert(session);
@@ -249,7 +263,8 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                 "sessionCode", session.getSessionCode(),
                 "qrCodeUrl", session.getQrCodeUrl(),
                 "status", session.getSessionStatus(),
-                "expiredAt", session.getExpiredAt()
+                "expiredAt", session.getExpiredAt(),
+                "accountId", session.getWechatAccountId()
         );
     }
 
@@ -268,10 +283,12 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                 session.setSessionStatus(statusResponse.status().toUpperCase());
             }
             if (statusResponse.status() != null && "confirmed".equalsIgnoreCase(statusResponse.status())) {
-                WechathlinkAccount account = accountMapper.selectOne(new LambdaQueryWrapper<WechathlinkAccount>()
+                WechathlinkAccount account = session.getWechatAccountId() == null
+                        ? accountMapper.selectOne(new LambdaQueryWrapper<WechathlinkAccount>()
                         .eq(WechathlinkAccount::getAccountCode, statusResponse.accountId())
                         .eq(WechathlinkAccount::getIsDeleted, 0)
-                        .last("LIMIT 1"));
+                        .last("LIMIT 1"))
+                        : getOperableAccount(session.getWechatAccountId());
                 boolean created = account == null;
                 if (account == null) {
                     account = new WechathlinkAccount();
@@ -280,6 +297,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                     fillCreateAudit(account);
                     CurrentAccount current = currentAccount();
                     account.setOwnerUserId(current == null ? null : current.getId());
+                    account.setBindStatus("UNBOUND");
                 } else {
                     fillUpdateAudit(account);
                 }
@@ -288,15 +306,20 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                 account.setIlinkUserId(statusResponse.ilinkUserId());
                 account.setLoginStatus("CONFIRMED");
                 account.setPollStatus("RUNNING");
+                account.setBindStatus("BOUND");
                 account.setLastError("");
+                account.setLastBindAt(LocalDateTime.now());
                 account.setStatus(1);
                 if (created) {
                     accountMapper.insert(account);
                     createDefaultOwnerMembership(account);
-                } else {
-                    accountMapper.updateById(account);
                 }
+                WechathlinkBotRuntime runtimeRecord = upsertRuntime(account, statusResponse);
+                account.setCurrentRuntimeId(runtimeRecord == null ? account.getCurrentRuntimeId() : runtimeRecord.getId());
+                fillUpdateAudit(account);
+                accountMapper.updateById(account);
                 session.setWechatAccountId(account.getId());
+                session.setConfirmedRuntimeId(account.getCurrentRuntimeId());
                 pollerManager.start(account.getId());
             }
             fillUpdateAudit(session);
@@ -402,11 +425,51 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         payload.put("ilinkUserId", account.getIlinkUserId());
         payload.put("loginStatus", account.getLoginStatus());
         payload.put("pollStatus", pollerManager.isRunning(account.getId()) ? "RUNNING" : account.getPollStatus());
+        payload.put("bindStatus", account.getBindStatus());
+        payload.put("currentRuntimeId", account.getCurrentRuntimeId());
+        payload.put("lastBindAt", account.getLastBindAt());
         payload.put("lastError", account.getLastError());
         payload.put("ownerUserId", account.getOwnerUserId());
         payload.put("status", account.getStatus());
         payload.put("lastPollAt", account.getLastPollAt());
         payload.put("lastInboundAt", account.getLastInboundAt());
         return payload;
+    }
+
+    private WechathlinkBotRuntime upsertRuntime(WechathlinkAccount account, IlinkModels.QrStatusResponse statusResponse) {
+        if (account == null || account.getId() == null) {
+            return null;
+        }
+        WechathlinkBotRuntime activeRuntime = botRuntimeMapper.selectOne(new LambdaQueryWrapper<WechathlinkBotRuntime>()
+                .eq(WechathlinkBotRuntime::getWechatAccountId, account.getId())
+                .eq(WechathlinkBotRuntime::getIsDeleted, 0)
+                .eq(WechathlinkBotRuntime::getIsActive, 1)
+                .last("LIMIT 1"));
+        if (activeRuntime != null) {
+            activeRuntime.setIsActive(0);
+            activeRuntime.setRuntimeStatus("REPLACED");
+            activeRuntime.setLastOfflineAt(LocalDateTime.now());
+            fillUpdateAudit(activeRuntime);
+            botRuntimeMapper.updateById(activeRuntime);
+        }
+        WechathlinkBotRuntime runtime = new WechathlinkBotRuntime();
+        runtime.setWechatAccountId(account.getId());
+        runtime.setRuntimeType("ILINK");
+        runtime.setBaseUrl(StringUtils.hasText(statusResponse.baseUrl()) ? statusResponse.baseUrl() : account.getBaseUrl());
+        runtime.setBotToken(statusResponse.botToken());
+        runtime.setIlinkUserId(statusResponse.ilinkUserId());
+        runtime.setRuntimeStatus("ONLINE");
+        runtime.setLastOnlineAt(LocalDateTime.now());
+        runtime.setLastHeartbeatAt(LocalDateTime.now());
+        runtime.setIsActive(1);
+        runtime.setLastError("");
+        fillCreateAudit(runtime);
+        botRuntimeMapper.insert(runtime);
+        if (activeRuntime != null && activeRuntime.getId() != null) {
+            activeRuntime.setReplaceByRuntimeId(runtime.getId());
+            fillUpdateAudit(activeRuntime);
+            botRuntimeMapper.updateById(activeRuntime);
+        }
+        return runtime;
     }
 }

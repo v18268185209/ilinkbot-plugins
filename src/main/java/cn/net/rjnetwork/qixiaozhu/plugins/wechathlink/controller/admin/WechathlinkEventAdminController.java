@@ -52,6 +52,7 @@ public class WechathlinkEventAdminController extends WechathlinkBaseController {
     @WebLayer(name = "Wechat hlink event list", code = "/api/wechathlink/admin/events/list")
     @ResolveClassLoader
     public ResultBody<Map<String, Object>> list(@RequestParam(required = false) Long wechatAccountId,
+                                                @RequestParam(required = false) Long eventId,
                                                 @RequestParam(required = false) String contactId,
                                                 @RequestParam(required = false) String direction,
                                                 @RequestParam(required = false) String eventType,
@@ -61,7 +62,7 @@ public class WechathlinkEventAdminController extends WechathlinkBaseController {
                                                 @RequestParam(required = false) Integer hasMedia,
                                                 @RequestParam(required = false) Integer pageNum,
                                                 @RequestParam(required = false) Integer pageSize) {
-        return renderSuccess(eventService.list(wechatAccountId, contactId, direction, eventType, dateFrom, dateTo, keyword, hasMedia, pageNum, pageSize));
+        return renderSuccess(eventService.list(wechatAccountId, eventId, contactId, direction, eventType, dateFrom, dateTo, keyword, hasMedia, pageNum, pageSize));
     }
 
     @GetMapping(value = "/export", produces = "text/csv;charset=UTF-8")
@@ -93,6 +94,38 @@ public class WechathlinkEventAdminController extends WechathlinkBaseController {
                                                     @RequestParam(required = false) Integer pageNum,
                                                     @RequestParam(required = false) Integer pageSize) {
         return renderSuccess(eventService.contacts(wechatAccountId, keyword, pageNum, pageSize));
+    }
+
+    @GetMapping("/dispatches")
+    @Operation(summary = "Wechat hlink dispatch list")
+    @WebLayer(name = "Wechat hlink dispatch list", code = "/api/wechathlink/admin/events/dispatches")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> dispatches(@RequestParam(required = false) Long wechatAccountId,
+                                                      @RequestParam(required = false) Long dispatchId,
+                                                      @RequestParam(required = false) String contactId,
+                                                      @RequestParam(required = false) String dispatchType,
+                                                      @RequestParam(required = false) String dispatchStatus,
+                                                      @RequestParam(required = false) String traceId,
+                                                      @RequestParam(required = false) String keyword,
+                                                      @RequestParam(required = false) Integer pageNum,
+                                                      @RequestParam(required = false) Integer pageSize) {
+        return renderSuccess(eventService.dispatches(wechatAccountId, dispatchId, contactId, dispatchType, dispatchStatus, traceId, keyword, pageNum, pageSize));
+    }
+
+    @GetMapping("/media-assets")
+    @Operation(summary = "Wechat hlink media asset list")
+    @WebLayer(name = "Wechat hlink media asset list", code = "/api/wechathlink/admin/events/media-assets")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> mediaAssets(@RequestParam(required = false) Long wechatAccountId,
+                                                       @RequestParam(required = false) Long assetId,
+                                                       @RequestParam(required = false) Long eventId,
+                                                       @RequestParam(required = false) Long dispatchId,
+                                                       @RequestParam(required = false) String assetType,
+                                                       @RequestParam(required = false) String downloadStatus,
+                                                       @RequestParam(required = false) String keyword,
+                                                       @RequestParam(required = false) Integer pageNum,
+                                                       @RequestParam(required = false) Integer pageSize) {
+        return renderSuccess(eventService.mediaAssets(wechatAccountId, assetId, eventId, dispatchId, assetType, downloadStatus, keyword, pageNum, pageSize));
     }
 
     @GetMapping("/media")

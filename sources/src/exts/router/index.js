@@ -1,22 +1,25 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import appEnv from '../../config/env'
+import { routeMetaConfig } from '../../config/navigation'
 import { hasPermission } from '../../utils/permission'
 import OverviewPage from '../../pages/overview/index.vue'
 import AccountsPage from '../../pages/accounts/index.vue'
 import EventsPage from '../../pages/events/index.vue'
 import MessagesPage from '../../pages/messages/index.vue'
 import AuditsPage from '../../pages/audits/index.vue'
+import PlatformPage from '../../pages/platform/index.vue'
 import SettingsPage from '../../pages/settings/index.vue'
 
 const routes = [
   { path: '/', redirect: '/overview' },
   { path: '/dashboard/plugins/wechathlink', redirect: '/dashboard/plugins/wechathlink/overview' },
-  { path: '/overview', alias: '/dashboard/plugins/wechathlink/overview', component: OverviewPage, meta: { permission: '/dashboard/plugins/wechathlink/overview' } },
-  { path: '/accounts', alias: '/dashboard/plugins/wechathlink/accounts', component: AccountsPage, meta: { permission: '/dashboard/plugins/wechathlink/accounts' } },
-  { path: '/events', alias: '/dashboard/plugins/wechathlink/events', component: EventsPage, meta: { permission: '/dashboard/plugins/wechathlink/events' } },
-  { path: '/messages', alias: '/dashboard/plugins/wechathlink/messages', component: MessagesPage, meta: { permission: '/dashboard/plugins/wechathlink/messages' } },
-  { path: '/audits', alias: '/dashboard/plugins/wechathlink/audits', component: AuditsPage, meta: { permission: '/dashboard/plugins/wechathlink/audits' } },
-  { path: '/settings', alias: '/dashboard/plugins/wechathlink/settings', component: SettingsPage, meta: { permission: '/dashboard/plugins/wechathlink/settings' } },
+  { path: '/overview', alias: '/dashboard/plugins/wechathlink/overview', component: OverviewPage, meta: routeMetaConfig.overview },
+  { path: '/accounts', alias: '/dashboard/plugins/wechathlink/accounts', component: AccountsPage, meta: routeMetaConfig.accounts },
+  { path: '/events', alias: '/dashboard/plugins/wechathlink/events', component: EventsPage, meta: routeMetaConfig.events },
+  { path: '/messages', alias: '/dashboard/plugins/wechathlink/messages', component: MessagesPage, meta: routeMetaConfig.messages },
+  { path: '/audits', alias: '/dashboard/plugins/wechathlink/audits', component: AuditsPage, meta: routeMetaConfig.audits },
+  { path: '/platform', alias: '/dashboard/plugins/wechathlink/platform', component: PlatformPage, meta: routeMetaConfig.platform },
+  { path: '/settings', alias: '/dashboard/plugins/wechathlink/settings', component: SettingsPage, meta: routeMetaConfig.settings },
   { path: '/:pathMatch(.*)*', redirect: '/overview' }
 ]
 

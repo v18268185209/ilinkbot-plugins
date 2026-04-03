@@ -14,6 +14,8 @@ public class WechathlinkStandaloneUiController {
             "/accounts",
             "/events",
             "/messages",
+            "/audits",
+            "/platform",
             "/settings",
             "/dashboard/plugins/wechathlink",
             "/dashboard/plugins/wechathlink/**"

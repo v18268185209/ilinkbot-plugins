@@ -7,7 +7,7 @@
     >
       <template #actions>
         <n-button v-permission="'/api/wechathlink/admin/accounts/list'" @click="loadAccounts">刷新</n-button>
-        <n-button v-permission="'btn:wechathlink_accounts:loginstart'" @click="openLoginModal">扫码接入</n-button>
+        <n-button v-permission="'btn:wechathlink_accounts:loginstart'" @click="openLoginModal()">扫码绑定</n-button>
         <n-button v-permission="'btn:wechathlink_accounts:member'" @click="openMemberModal()">成员授权</n-button>
         <n-button v-permission="'btn:wechathlink_accounts:create'" type="primary" @click="openAccountModal()">新增账号</n-button>
       </template>
@@ -16,6 +16,49 @@
     <n-card title="账号列表">
       <n-data-table :columns="columns" :data="rows" :pagination="false" />
     </n-card>
+
+    <modal-frame v-model:show="detailModalVisible" title="账号详情" :height="680" :width="1080">
+      <div v-if="detailAccount" class="account-detail-shell">
+        <div class="account-detail-grid">
+          <div class="account-detail-card">
+            <span>账号编码</span>
+            <strong>{{ detailAccount.accountCode || '-' }}</strong>
+          </div>
+          <div class="account-detail-card">
+            <span>账号名称</span>
+            <strong>{{ detailAccount.accountName || '-' }}</strong>
+          </div>
+          <div class="account-detail-card">
+            <span>绑定状态</span>
+            <strong>{{ 绑定状态文本(detailAccount.bindStatus) }}</strong>
+          </div>
+          <div class="account-detail-card">
+            <span>当前 Runtime</span>
+            <strong>{{ detailAccount.currentRuntimeId || '-' }}</strong>
+          </div>
+          <div class="account-detail-card">
+            <span>最近绑定时间</span>
+            <strong>{{ formatDateTime(detailAccount.lastBindAt) }}</strong>
+          </div>
+          <div class="account-detail-card">
+            <span>最近轮询时间</span>
+            <strong>{{ formatDateTime(detailAccount.lastPollAt) }}</strong>
+          </div>
+        </div>
+
+        <n-card title="运行实例" size="small">
+          <n-data-table :columns="runtimeColumns" :data="detailRuntimes" :pagination="false" />
+        </n-card>
+
+        <n-card title="最近绑定会话" size="small">
+          <n-data-table :columns="sessionColumns" :data="detailSessions" :pagination="false" />
+        </n-card>
+      </div>
+      <n-empty v-else description="请选择账号查看详情" />
+      <template #footer>
+        <n-button @click="detailModalVisible = false">关闭</n-button>
+      </template>
+    </modal-frame>
 
     <modal-frame v-model:show="accountModalVisible" :title="accountModalTitle" :height="520">
       <n-form label-placement="top">
@@ -47,12 +90,21 @@
       </template>
     </modal-frame>
 
-    <modal-frame v-model:show="loginModalVisible" title="扫码登录接入" :height="560">
+    <modal-frame v-model:show="loginModalVisible" title="扫码绑定机器人" :height="620">
       <n-space vertical size="large">
         <n-alert type="info" title="提示" :bordered="false">
-          创建登录会话后会生成二维码，扫码确认后刷新状态即可自动生成微信账号并启动轮询。
+          请先选择一个已创建的微信基础账号，再发起扫码绑定。扫码成功后会为该账号生成新的机器人运行实例并启动轮询。
         </n-alert>
         <n-form label-placement="top">
+          <n-form-item label="绑定目标账号">
+            <n-select
+              v-model:value="loginTargetAccountId"
+              :options="accountOptions"
+              filterable
+              placeholder="请选择要绑定的微信账号"
+              @update:value="handleLoginTargetChange"
+            />
+          </n-form-item>
           <n-form-item>
             <template #label>
             <field-hint label="登录接入地址" tip="可为空，留空时使用系统设置中的默认 iLink 接入地址。"/>
@@ -94,7 +146,15 @@
       <template #footer>
         <n-button @click="loginModalVisible = false">关闭</n-button>
         <n-button v-permission="'btn:wechathlink_accounts:loginstatus'" @click="refreshLoginStatus" :disabled="!loginSession.sessionCode || loginPolling">刷新状态</n-button>
-        <n-button v-permission="'btn:wechathlink_accounts:loginstart'" type="primary" @click="createLoginSession" :loading="creatingLoginSession">创建会话</n-button>
+        <n-button
+          v-permission="'btn:wechathlink_accounts:loginstart'"
+          type="primary"
+          @click="createLoginSession"
+          :loading="creatingLoginSession"
+          :disabled="!loginTargetAccountId"
+        >
+          创建会话
+        </n-button>
       </template>
     </modal-frame>
 
@@ -172,11 +232,14 @@ const loginSession = ref({})
 const accountModalVisible = ref(false)
 const loginModalVisible = ref(false)
 const memberModalVisible = ref(false)
+const detailModalVisible = ref(false)
 const creatingLoginSession = ref(false)
 const loginPolling = ref(false)
 const qrImageError = ref(false)
+const loginTargetAccountId = ref(null)
 let loginPollingTimer = null
 const memberRows = ref([])
+const detailPayload = ref(null)
 const memberForm = reactive({
   wechatAccountId: null,
   userId: '',
@@ -186,6 +249,9 @@ const memberForm = reactive({
 
 const accountModalTitle = computed(() => form.id ? '编辑微信账号' : '新增微信账号')
 const qrCodeSrc = computed(() => resolveApiAssetUrl(loginSession.value.qrCodeUrl))
+const detailAccount = computed(() => detailPayload.value?.account || null)
+const detailRuntimes = computed(() => ensureArray(detailPayload.value?.runtimes))
+const detailSessions = computed(() => ensureArray(detailPayload.value?.loginSessions))
 
 const loginStatusOptions = [
   { label: '已创建', value: 'CREATED' },
@@ -224,6 +290,9 @@ const accountOptions = computed(() => rows.value.map((item) => ({
 const columns = [
   { title: '账号编码', key: 'accountCode' },
   { title: '账号名称', key: 'accountName' },
+  { title: '绑定状态', key: 'bindStatus', render: (row) => h(NTag, { type: 绑定状态标签(row.bindStatus), bordered: false }, { default: () => 绑定状态文本(row.bindStatus) }) },
+  { title: '当前 Runtime', key: 'currentRuntimeId', render: (row) => row.currentRuntimeId || '-' },
+  { title: '最近绑定', key: 'lastBindAt', render: (row) => formatDateTime(row.lastBindAt) },
   { title: '接入地址', key: 'baseUrl' },
   { title: '登录状态', key: 'loginStatus', render: (row) => h(NTag, { type: 'info' }, { default: () => 登录状态文本(row.loginStatus) }) },
   { title: '轮询状态', key: 'pollStatus', render: (row) => h(NTag, { type: row.pollStatus === 'RUNNING' ? 'success' : 'warning' }, { default: () => 轮询状态文本(row.pollStatus) }) },
@@ -234,6 +303,9 @@ const columns = [
       'div',
       { style: 'display:flex;gap:8px;flex-wrap:wrap;' },
       [
+        hasPermission('/api/wechathlink/admin/accounts/detail')
+          ? h(NButton, { size: 'small', tertiary: true, onClick: () => openDetailModal(row) }, { default: () => '详情' })
+          : null,
         hasPermission('btn:wechathlink_accounts:create')
           ? h(NButton, { size: 'small', quaternary: true, onClick: () => openAccountModal(row) }, { default: () => '编辑' })
           : null,
@@ -242,10 +314,30 @@ const columns = [
           : null,
         hasPermission('btn:wechathlink_accounts:member')
           ? h(NButton, { size: 'small', tertiary: true, onClick: () => openMemberModal(row) }, { default: () => '授权' })
+          : null,
+        hasPermission('btn:wechathlink_accounts:loginstart')
+          ? h(NButton, { size: 'small', tertiary: true, onClick: () => openLoginModal(row) }, { default: () => (row.bindStatus === 'BOUND' ? '重绑' : '绑定') })
           : null
       ].filter(Boolean)
     )
   }
+]
+
+const runtimeColumns = [
+  { title: 'Runtime ID', key: 'id', width: 100 },
+  { title: '状态', key: 'runtimeStatus', width: 100, render: (row) => h(NTag, { bordered: false, type: runtimeTagType(row.runtimeStatus) }, { default: () => row.runtimeStatus || '-' }) },
+  { title: '是否当前', key: 'isActive', width: 90, render: (row) => (Number(row.isActive) === 1 ? '是' : '否') },
+  { title: '接入地址', key: 'baseUrl', minWidth: 200 },
+  { title: '最后在线', key: 'lastOnlineAt', width: 180, render: (row) => formatDateTime(row.lastOnlineAt) },
+  { title: '最后心跳', key: 'lastHeartbeatAt', width: 180, render: (row) => formatDateTime(row.lastHeartbeatAt) }
+]
+
+const sessionColumns = [
+  { title: '会话编号', key: 'sessionCode', minWidth: 220 },
+  { title: '状态', key: 'sessionStatus', width: 120 },
+  { title: '绑定 Runtime', key: 'confirmedRuntimeId', width: 120, render: (row) => row.confirmedRuntimeId || '-' },
+  { title: '过期时间', key: 'expiredAt', width: 180, render: (row) => formatDateTime(row.expiredAt) },
+  { title: '接入地址', key: 'baseUrl', minWidth: 220 }
 ]
 
 const memberColumns = [
@@ -361,6 +453,60 @@ function 轮询状态文本(value) {
   return map[value] || value || '-'
 }
 
+function 绑定状态文本(value) {
+  const map = {
+    UNBOUND: '未绑定',
+    BOUND: '已绑定',
+    EXPIRING_SOON: '即将失效',
+    REAUTH_REQUIRED: '需重绑',
+    DISABLED: '已停用'
+  }
+  return map[value] || value || '-'
+}
+
+function 绑定状态标签(value) {
+  if (value === 'BOUND') {
+    return 'success'
+  }
+  if (value === 'EXPIRING_SOON') {
+    return 'warning'
+  }
+  if (value === 'REAUTH_REQUIRED') {
+    return 'error'
+  }
+  return 'default'
+}
+
+function runtimeTagType(value) {
+  if (value === 'ONLINE') {
+    return 'success'
+  }
+  if (value === 'OFFLINE') {
+    return 'warning'
+  }
+  if (value === 'EXPIRED') {
+    return 'error'
+  }
+  return 'default'
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '-'
+  }
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  const year = date.getFullYear()
+  const month = `${date.getMonth() + 1}`.padStart(2, '0')
+  const day = `${date.getDate()}`.padStart(2, '0')
+  const hour = `${date.getHours()}`.padStart(2, '0')
+  const minute = `${date.getMinutes()}`.padStart(2, '0')
+  const second = `${date.getSeconds()}`.padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${minute}:${second}`
+}
+
 function resetAccountForm() {
   form.id = null
   form.accountCode = ''
@@ -395,16 +541,38 @@ async function toggle(row) {
   await loadAccounts()
 }
 
-function openLoginModal() {
+async function openDetailModal(row) {
+  detailPayload.value = await api.getAccountDetail(row.id)
+  detailModalVisible.value = true
+}
+
+function openLoginModal(row = null) {
   qrImageError.value = false
+  loginTargetAccountId.value = row?.id || null
+  loginBaseUrl.value = row?.baseUrl || ''
+  loginSession.value = {}
   loginModalVisible.value = true
 }
 
+function handleLoginTargetChange(value) {
+  loginTargetAccountId.value = value
+  const target = rows.value.find((item) => item.id === value)
+  if (target && target.baseUrl) {
+    loginBaseUrl.value = target.baseUrl
+  }
+}
+
 async function createLoginSession() {
+  if (!loginTargetAccountId.value) {
+    return
+  }
   creatingLoginSession.value = true
   qrImageError.value = false
   try {
-    loginSession.value = await api.startLoginSession(loginBaseUrl.value)
+    loginSession.value = await api.startLoginSession({
+      wechatAccountId: loginTargetAccountId.value,
+      baseUrl: loginBaseUrl.value
+    })
   } finally {
     creatingLoginSession.value = false
   }

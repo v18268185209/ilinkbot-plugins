@@ -1,5 +1,26 @@
 <template>
   <div class="page page--messages">
+    <header class="conversation-workbench">
+      <div class="conversation-workbench__intro">
+        <div class="conversation-workbench__kicker">会话运营</div>
+        <strong>会话工作台</strong>
+        <span>围绕联系人处理回复窗口、上下文和文本/媒体发送，必要时再切到追踪页排查链路。</span>
+      </div>
+
+      <div class="conversation-workbench__actions">
+        <n-button v-permission="'/api/wechathlink/admin/messages/peers'" @click="refreshWorkspace">刷新会话</n-button>
+        <n-button v-permission="'/api/wechathlink/admin/events/list'" :disabled="!selectedAccountId" type="primary" @click="openTraceWorkspace">转到追踪</n-button>
+      </div>
+
+      <div class="conversation-kpis">
+        <article v-for="item in conversationKpis" :key="item.key" class="conversation-kpi">
+          <span class="conversation-kpi__label">{{ item.label }}</span>
+          <strong>{{ item.value }}</strong>
+          <small>{{ item.note }}</small>
+        </article>
+      </div>
+    </header>
+
     <section class="chat-shell">
       <aside class="chat-sidebar">
         <div class="chat-sidebar__panel">
@@ -64,7 +85,7 @@
                     selectedContactId === item.contactId ? 'contact-item--active' : '',
                     item.isUnread ? 'contact-item--unread' : '',
                     item.hasRecentReplyFailure ? 'contact-item--failed' : '',
-                    item.hasContextToken ? 'contact-item--replyable' : 'contact-item--blocked'
+                    item.canReply ? 'contact-item--replyable' : 'contact-item--blocked'
                   ]"
                   @click="selectContact(item)"
                 >
@@ -91,8 +112,11 @@
                         >
                           回复失败
                         </span>
-                        <span :class="['contact-pill', item.hasContextToken ? 'contact-pill--ready' : 'contact-pill--muted']">
-                          {{ item.hasContextToken ? '可回复' : '需等待新消息' }}
+                        <span :class="['contact-pill', item.canReply ? 'contact-pill--ready' : 'contact-pill--muted']">
+                          {{ replyStatusText(item) }}
+                        </span>
+                        <span v-if="item.replyWindowExpiresAt" class="contact-pill contact-pill--window">
+                          {{ windowStatusText(item.windowStatus) }}
                         </span>
                       </div>
 
@@ -127,13 +151,14 @@
             <div>
               <div class="chat-main__title">
                 <strong>{{ selectedContact.contactId }}</strong>
-                <n-tag size="small" :bordered="false" :type="selectedContact.hasContextToken ? 'success' : 'warning'">
-                  {{ selectedContact.hasContextToken ? '可回复' : '上下文不足' }}
+                <n-tag size="small" :bordered="false" :type="selectedContact.canReply ? 'success' : 'warning'">
+                  {{ replyStatusText(selectedContact) }}
                 </n-tag>
               </div>
               <div class="chat-main__meta">
                 <span>账号：{{ selectedAccount.accountName || selectedAccount.accountCode }}</span>
                 <span>最近活跃：{{ formatDateTime(selectedContact.lastSeenAt) }}</span>
+                <span>窗口到期：{{ formatDateTime(selectedContact.replyWindowExpiresAt) }}</span>
                 <span>联系频次：{{ selectedContact.totalCount || 0 }}</span>
               </div>
             </div>
@@ -216,9 +241,40 @@
               <strong>{{ selectedContact.contactId }}</strong>
               <span>{{ selectedContact.lastMessagePreview || '已选择联系人' }}</span>
             </div>
-            <n-alert v-if="selectedContact && !selectedContact.hasContextToken" type="warning" :bordered="false">
-              当前联系人没有可用上下文，暂时不能直接回复。请先等待该联系人发送新消息。
+            <n-alert v-if="selectedContact && !selectedContact.canReply" type="warning" :bordered="false">
+              当前联系人不在可回复窗口内，暂时不能直接回复。请等待该联系人发送新消息或重新建立上下文。
             </n-alert>
+
+            <section v-if="selectedContact" class="composer-insights">
+              <article class="composer-insight">
+                <span class="composer-insight__label">回复窗口</span>
+                <strong>{{ replyStatusText(selectedContact) }}</strong>
+                <small>{{ selectedContactWindowHint }}</small>
+              </article>
+              <article class="composer-insight">
+                <span class="composer-insight__label">最近活跃</span>
+                <strong>{{ relativeTime(selectedContact.lastSeenAt) }}</strong>
+                <small>{{ selectedContact.lastMessagePreview || '暂无会话摘要' }}</small>
+              </article>
+              <article class="composer-insight">
+                <span class="composer-insight__label">会话规模</span>
+                <strong>{{ selectedContact.totalCount || 0 }}</strong>
+                <small>{{ selectedContact.canReply ? '当前可直接回复' : '建议等待新消息或切到追踪页排查' }}</small>
+              </article>
+            </section>
+
+            <section v-if="lastDispatchSummary" class="dispatch-result">
+              <div class="dispatch-result__head">
+                <strong>最近一次投递</strong>
+                <span>{{ lastDispatchSummary.statusText }}</span>
+              </div>
+              <div class="dispatch-result__meta">
+                <span>事件 {{ lastDispatchSummary.eventId }}</span>
+                <span>分发 {{ lastDispatchSummary.dispatchId }}</span>
+                <span v-if="lastDispatchSummary.mediaAssetId">媒体 {{ lastDispatchSummary.mediaAssetId }}</span>
+                <span v-if="lastDispatchSummary.traceId">Trace {{ lastDispatchSummary.traceId }}</span>
+              </div>
+            </section>
 
             <div class="chat-composer__tabs">
               <n-tabs v-model:value="composeTab" type="line" animated>
@@ -361,11 +417,15 @@
 
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import api from '../../api.js'
 import { ensureArray } from '../../utils/http'
 import ModalFrame from '../../components/ModalFrame.vue'
 
 const BOTTOM_STICKY_THRESHOLD = 72
+const EVENT_FILTER_STORAGE_KEY = 'wechathlink:events:filters'
+const route = useRoute()
+const router = useRouter()
 
 const commonPhrases = [
   '您好，已收到您的消息。',
@@ -418,6 +478,8 @@ const previewModalVisible = ref(false)
 const previewEvent = ref(null)
 const contactUiStateStore = reactive({})
 const conversationStateStore = reactive({})
+const pendingRouteFocus = ref(null)
+const lastAppliedRouteFocusKey = ref('')
 
 const mediaTypeOptions = [
   { label: '图片', value: 'image' },
@@ -464,9 +526,105 @@ const previewTitle = computed(() => previewEvent.value?.mediaFileName || '媒体
 const previewKind = computed(() => previewEvent.value?.eventType || '')
 const previewSrc = computed(() => previewEvent.value?.id ? api.getEventMediaUrl(previewEvent.value.id) : '')
 
-const canReply = computed(() => !!selectedAccount.value && !!selectedContact.value && selectedContact.value.hasContextToken)
+const canReply = computed(() => !!selectedAccount.value && !!selectedContact.value && selectedContact.value.canReply)
 const canSendText = computed(() => canReply.value && !!textDraft.value.trim())
 const canSendMedia = computed(() => canReply.value && !!uploadedMedia.value?.filePath)
+const replyableContactCount = computed(() => contactRows.value.filter((item) => item.canReply).length)
+const blockedContactCount = computed(() => contactRows.value.filter((item) => !item.canReply).length)
+const unreadContactCount = computed(() => contactRows.value.filter((item) => item.isUnread).length)
+const failedReplyCount = computed(() => contactRows.value.filter((item) => item.hasRecentReplyFailure).length)
+const conversationKpis = computed(() => [
+  {
+    key: 'account',
+    label: '当前账号',
+    value: selectedAccount.value ? `${selectedAccount.value.accountName || selectedAccount.value.accountCode || `#${selectedAccount.value.id}`}` : '未选择',
+    note: selectedAccount.value ? `账号 #${selectedAccount.value.id}` : '先选择要处理的微信账号'
+  },
+  {
+    key: 'replyable',
+    label: '可回复会话',
+    value: replyableContactCount.value,
+    note: '处于有效上下文和窗口期的联系人'
+  },
+  {
+    key: 'blocked',
+    label: '受限会话',
+    value: blockedContactCount.value,
+    note: '窗口关闭或上下文不可直接回复'
+  },
+  {
+    key: 'failed',
+    label: '回复失败',
+    value: failedReplyCount.value,
+    note: '最近一次回复执行失败的联系人'
+  },
+  {
+    key: 'unread',
+    label: '未读提醒',
+    value: unreadContactCount.value,
+    note: '还未打开的活跃联系人'
+  }
+])
+const selectedContactWindowHint = computed(() => {
+  if (!selectedContact.value) {
+    return ''
+  }
+  if (selectedContact.value.canReply) {
+    return selectedContact.value.replyWindowExpiresAt
+      ? `窗口预计 ${formatDateTime(selectedContact.value.replyWindowExpiresAt)} 关闭`
+      : '当前窗口保持开启，可直接回复'
+  }
+  if (selectedContact.value.windowStatus === 'CLOSING_SOON') {
+    return '窗口已接近关闭，建议优先处理该会话'
+  }
+  if (selectedContact.value.windowStatus === 'CLOSED') {
+    return '窗口已关闭，需等待对方再次发消息建立上下文'
+  }
+  return '当前未形成可回复上下文'
+})
+const lastDispatchSummary = computed(() => {
+  if (!lastResult.value || Object.keys(lastResult.value).length === 0) {
+    return null
+  }
+  return {
+    eventId: lastResult.value.eventId || '-',
+    dispatchId: lastResult.value.dispatchId || '-',
+    mediaAssetId: lastResult.value.mediaAssetId || '',
+    traceId: lastResult.value.traceId || '',
+    statusText: lastResult.value.ok ? '投递已进入业务链路' : '最近投递未成功'
+  }
+})
+
+function resolveRouteFocus() {
+  const accountId = Number(route.query.accountId || 0)
+  const contactId = `${route.query.contactId || ''}`.trim()
+  const eventType = `${route.query.eventType || ''}`.trim()
+  if (!accountId && !contactId) {
+    return null
+  }
+  return {
+    accountId: accountId || null,
+    contactId,
+    eventType: eventType || null
+  }
+}
+
+function applyRouteFocus() {
+  const focus = resolveRouteFocus()
+  if (!focus) {
+    return
+  }
+  const key = `${focus.accountId || ''}|${focus.contactId}|${focus.eventType || ''}`
+  if (key === lastAppliedRouteFocusKey.value) {
+    return
+  }
+  lastAppliedRouteFocusKey.value = key
+  pendingRouteFocus.value = focus
+  conversationEventType.value = focus.eventType || null
+  if (focus.accountId) {
+    selectedAccountId.value = focus.accountId
+  }
+}
 
 async function loadAccounts() {
   const payload = await api.listAccounts()
@@ -534,6 +692,15 @@ async function loadContacts(options = {}) {
   const matched = contactRows.value.find((item) => item.contactId === selectedContactId.value)
   if (matched) {
     selectedContact.value = matched
+  }
+  const routeFocus = pendingRouteFocus.value
+  if (routeFocus && Number(routeFocus.accountId || 0) === Number(selectedAccountId.value || 0) && routeFocus.contactId) {
+    const focused = contactRows.value.find((item) => item.contactId === routeFocus.contactId)
+    if (focused) {
+      pendingRouteFocus.value = null
+      await selectContact(focused)
+      return
+    }
   }
   if (!selectedContactId.value) {
     await selectContact(contactRows.value[0])
@@ -755,6 +922,27 @@ async function refreshWorkspace() {
   })
 }
 
+function openTraceWorkspace() {
+  if (!selectedAccountId.value) {
+    return
+  }
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.setItem(EVENT_FILTER_STORAGE_KEY, JSON.stringify({
+      selectedAccountId: selectedAccountId.value,
+      summaryKeyword: '',
+      detailFilters: {
+        contactId: selectedContactId.value || '',
+        keyword: '',
+        direction: null,
+        eventType: conversationEventType.value,
+        hasMedia: null,
+        dateRange: null
+      }
+    }))
+  }
+  router.push('/events')
+}
+
 function openPreview(row) {
   previewEvent.value = row
   previewModalVisible.value = true
@@ -844,6 +1032,34 @@ function activityText(value) {
     return '近期'
   }
   return '较早'
+}
+
+function windowStatusText(value) {
+  const map = {
+    OPEN: '窗口开启',
+    CLOSING_SOON: '即将关闭',
+    CLOSED: '窗口关闭'
+  }
+  return map[value] || value || '窗口关闭'
+}
+
+function replyStatusText(contact) {
+  if (!contact) {
+    return '不可回复'
+  }
+  if (contact.canReply) {
+    return '可回复'
+  }
+  if (contact.windowStatus === 'CLOSING_SOON') {
+    return '窗口临近关闭'
+  }
+  if (contact.windowStatus === 'CLOSED') {
+    return '需等待新消息'
+  }
+  if (contact.contextStatus === 'INVALID') {
+    return '上下文无效'
+  }
+  return '不可回复'
 }
 
 function groupContact(value) {
@@ -973,7 +1189,8 @@ function decorateContact(item) {
     ...item,
     isUnread: !isCurrentContact && normalizeDirection(item.lastDirection) === 'inbound' && !!lastSeenAt && (!lastReadAt || lastSeenAt > lastReadAt),
     hasRecentReplyFailure: Boolean(state.lastReplyFailure),
-    lastReplyFailureMessage: state.lastReplyFailure?.message || ''
+    lastReplyFailureMessage: state.lastReplyFailure?.message || '',
+    canReply: Boolean(item.canReply ?? item.hasContextToken)
   }
 }
 
@@ -1125,9 +1342,93 @@ onBeforeUnmount(() => {
 })
 
 onMounted(loadAccounts)
+
+watch(() => route.fullPath, () => {
+  applyRouteFocus()
+}, { immediate: true })
 </script>
 
 <style scoped>
+.conversation-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) auto;
+  gap: 16px;
+  padding: 18px 20px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top left, rgba(15, 118, 110, 0.14), transparent 34%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.97), rgba(248, 250, 252, 0.96));
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
+}
+
+.conversation-workbench__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.conversation-workbench__kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #0f766e;
+}
+
+.conversation-workbench__intro strong {
+  font-size: 28px;
+  line-height: 1.14;
+}
+
+.conversation-workbench__intro span {
+  color: #475569;
+  line-height: 1.7;
+}
+
+.conversation-workbench__actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.conversation-kpis {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.conversation-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.conversation-kpi__label {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.conversation-kpi strong {
+  font-size: 24px;
+  line-height: 1.1;
+}
+
+.conversation-kpi small {
+  color: #64748b;
+  line-height: 1.5;
+}
+
 .page--messages {
   height: calc(100vh - 112px);
   overflow: hidden;
@@ -1591,6 +1892,86 @@ onMounted(loadAccounts)
   flex-shrink: 0;
 }
 
+.composer-insights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.composer-insight {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(15, 118, 110, 0.06);
+  border: 1px solid rgba(15, 118, 110, 0.12);
+}
+
+.composer-insight__label {
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.composer-insight strong {
+  font-size: 20px;
+  line-height: 1.1;
+}
+
+.composer-insight small {
+  color: #475569;
+  line-height: 1.55;
+}
+
+.dispatch-result {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: rgba(2, 132, 199, 0.06);
+  border: 1px solid rgba(2, 132, 199, 0.12);
+}
+
+.dispatch-result__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dispatch-result__head strong {
+  font-size: 16px;
+}
+
+.dispatch-result__head span {
+  color: #0369a1;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.dispatch-result__meta {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dispatch-result__meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.74);
+  color: #0f172a;
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .composer-target {
   display: flex;
   flex-direction: column;
@@ -1713,6 +2094,14 @@ onMounted(loadAccounts)
 }
 
 @media (max-width: 900px) {
+  .conversation-workbench {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-workbench__actions {
+    justify-content: flex-start;
+  }
+
   .page--messages {
     height: auto;
     overflow: visible;
@@ -1737,6 +2126,13 @@ onMounted(loadAccounts)
   .chat-main__panel,
   .chat-sidebar__panel {
     height: auto;
+  }
+}
+
+@media (max-width: 640px) {
+  .conversation-kpis,
+  .composer-insights {
+    grid-template-columns: 1fr;
   }
 }
 </style>

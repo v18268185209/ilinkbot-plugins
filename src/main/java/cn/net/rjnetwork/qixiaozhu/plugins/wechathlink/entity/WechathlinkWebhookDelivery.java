@@ -6,22 +6,22 @@ import com.baomidou.mybatisplus.annotation.TableName;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
 
-import java.time.LocalDateTime;
-
 @Data
 @EqualsAndHashCode(callSuper = true)
-@TableName("wcf_login_session")
-public class WechathlinkLoginSession extends WechathlinkAuditEntity {
+@TableName("wcf_webhook_delivery")
+public class WechathlinkWebhookDelivery extends WechathlinkAuditEntity {
 
     @TableId(type = IdType.AUTO)
     private Long id;
-    private String sessionCode;
-    private String baseUrl;
-    private String qrCodeUrl;
-    private String qrCodeContent;
-    private String sessionStatus;
     private Long wechatAccountId;
-    private Long confirmedRuntimeId;
+    private Long eventId;
+    private String deliveryType;
+    private String targetUrl;
+    private String requestBody;
+    private String responseBody;
+    private Integer responseCode;
+    private String deliveryStatus;
+    private Integer attemptCount;
     private String errorMessage;
-    private LocalDateTime expiredAt;
+    private String traceId;
 }

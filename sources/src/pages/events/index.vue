@@ -3,9 +3,9 @@
     <section class="events-layout">
       <header class="events-overview">
         <div class="events-overview__intro">
-          <div class="events-overview__kicker">事件运营</div>
-          <strong>事件中心</strong>
-          <span>面向企业运营与审计的账号、事件、联系人一体化排查工作台。</span>
+          <div class="events-overview__kicker">投递追踪</div>
+          <strong>投递追踪工作台</strong>
+          <span>以账号、联系人、媒体和上下文为轴追踪消息链路，定位接入、会话与投递异常。</span>
         </div>
 
         <div class="events-overview__actions">
@@ -15,7 +15,7 @@
 
         <div class="events-kpis">
           <article class="events-kpi">
-            <span class="events-kpi__label">当前页账号</span>
+            <span class="events-kpi__label">追踪账号</span>
             <strong>{{ summaryRows.length }}</strong>
             <small>共 {{ summaryPaginationState.itemCount }} 个可见账号</small>
           </article>
@@ -25,12 +25,12 @@
             <small>轮询状态为 RUNNING</small>
           </article>
           <article class="events-kpi">
-            <span class="events-kpi__label">异常账号</span>
+            <span class="events-kpi__label">风险账号</span>
             <strong>{{ abnormalAccountCount }}</strong>
             <small>轮询异常或登录异常</small>
           </article>
           <article class="events-kpi">
-            <span class="events-kpi__label">当前页事件量</span>
+            <span class="events-kpi__label">可见事件</span>
             <strong>{{ visibleEventCount }}</strong>
             <small>{{ latestVisibleEventAt ? `最近事件 ${formatDateTime(latestVisibleEventAt)}` : '暂无事件' }}</small>
           </article>
@@ -42,8 +42,8 @@
           <div class="events-panel">
             <div class="events-panel__header">
               <div>
-                <strong>账号概览</strong>
-                <span>{{ summaryLoading ? '正在刷新账号事件摘要...' : '按账号查看健康度、事件规模与最近活跃时间。' }}</span>
+                <strong>账号入口</strong>
+                <span>{{ summaryLoading ? '正在刷新账号追踪摘要...' : '先按账号定位接入状态、事件规模与最近活跃时间。' }}</span>
               </div>
             </div>
 
@@ -111,12 +111,12 @@
           <div class="events-panel">
             <div class="events-panel__header events-panel__header--stack">
               <div>
-                <strong>{{ selectedAccount ? accountDisplayName(selectedAccount) : '事件流' }}</strong>
+                <strong>{{ selectedAccount ? accountDisplayName(selectedAccount) : workspaceTitle }}</strong>
                 <span>
                   {{
                     selectedAccount
-                      ? `微信账号 #${selectedAccount.wechatAccountId} 的事件流，支持按联系人、方向和类型排查。`
-                      : '请选择账号后查看事件流。'
+                      ? workspaceDescription
+                      : '请选择账号后查看当前追踪工作区。'
                   }}
                 </span>
               </div>
@@ -134,99 +134,271 @@
               </div>
             </div>
 
-            <div class="toolbar toolbar--filters">
-              <n-input
-                v-model:value="detailFilters.contactId"
-                clearable
-                placeholder="联系人ID"
-                @keyup.enter="applyDetailSearch"
-              />
-              <n-input
-                v-model:value="detailFilters.keyword"
-                clearable
-                placeholder="关键词 / 文件名 / 用户ID"
-                @keyup.enter="applyDetailSearch"
-              />
-              <n-select
-                v-model:value="detailFilters.direction"
-                :options="directionOptions"
-                clearable
-                placeholder="方向"
-              />
-              <n-select
-                v-model:value="detailFilters.eventType"
-                :options="eventTypeOptions"
-                clearable
-                placeholder="事件类型"
-              />
-              <n-select
-                v-model:value="detailFilters.hasMedia"
-                :options="hasMediaOptions"
-                clearable
-                placeholder="媒体筛选"
-              />
-              <n-date-picker
-                v-model:value="detailFilters.dateRange"
-                type="daterange"
-                clearable
-                start-placeholder="开始日期"
-                end-placeholder="结束日期"
-              />
-              <n-button v-permission="'/api/wechathlink/admin/events/list'" @click="applyDetailSearch">查询</n-button>
-              <n-button v-permission="'btn:wechathlink_events:export'" :disabled="!selectedAccount" @click="exportCurrentEvents">导出当前结果</n-button>
-            </div>
+            <n-tabs v-model:value="workspaceTab" type="segment" animated>
+              <n-tab-pane name="events" tab="事件流" />
+              <n-tab-pane name="dispatches" tab="分发记录" />
+              <n-tab-pane name="assets" tab="媒体资产" />
+            </n-tabs>
 
-            <div v-if="detailRows.length" class="event-list">
-              <button
-                v-for="row in detailRows"
-                :key="row.id"
-                type="button"
-                :class="['event-row', selectedEvent?.id === row.id ? 'event-row--active' : '']"
-                @click="selectEvent(row)"
-              >
-                <div class="event-row__top">
-                  <div class="event-row__chips">
-                    <span :class="['status-chip', `status-chip--${directionTone(row.direction)}`]">
-                      {{ directionText(row.direction) }}
-                    </span>
-                    <span class="status-chip status-chip--type">{{ eventTypeText(row.eventType) }}</span>
-                    <span v-if="row.mediaPath" class="status-chip status-chip--media">媒体</span>
-                    <span v-if="row.contextToken" class="status-chip status-chip--ready">上下文</span>
+            <div v-if="workspaceTab === 'events'" class="tracking-workspace">
+              <div class="toolbar toolbar--filters">
+                <n-input
+                  v-model:value="detailFilters.contactId"
+                  clearable
+                  placeholder="联系人ID"
+                  @keyup.enter="applyDetailSearch"
+                />
+                <n-input
+                  v-model:value="detailFilters.keyword"
+                  clearable
+                  placeholder="关键词 / 文件名 / 用户ID"
+                  @keyup.enter="applyDetailSearch"
+                />
+                <n-select
+                  v-model:value="detailFilters.direction"
+                  :options="directionOptions"
+                  clearable
+                  placeholder="方向"
+                />
+                <n-select
+                  v-model:value="detailFilters.eventType"
+                  :options="eventTypeOptions"
+                  clearable
+                  placeholder="事件类型"
+                />
+                <n-select
+                  v-model:value="detailFilters.hasMedia"
+                  :options="hasMediaOptions"
+                  clearable
+                  placeholder="媒体筛选"
+                />
+                <n-date-picker
+                  v-model:value="detailFilters.dateRange"
+                  type="daterange"
+                  clearable
+                  start-placeholder="开始日期"
+                  end-placeholder="结束日期"
+                />
+                <n-button v-permission="'/api/wechathlink/admin/events/list'" @click="applyDetailSearch">查询</n-button>
+                <n-button v-permission="'btn:wechathlink_events:export'" :disabled="!selectedAccount" @click="exportCurrentEvents">导出当前结果</n-button>
+              </div>
+
+              <div v-if="detailRows.length" class="event-list">
+                <button
+                  v-for="row in detailRows"
+                  :key="row.id"
+                  type="button"
+                  :class="['event-row', selectedEvent?.id === row.id ? 'event-row--active' : '']"
+                  @click="selectEvent(row)"
+                >
+                  <div class="event-row__top">
+                    <div class="event-row__chips">
+                      <span :class="['status-chip', `status-chip--${directionTone(row.direction)}`]">
+                        {{ directionText(row.direction) }}
+                      </span>
+                      <span class="status-chip status-chip--type">{{ eventTypeText(row.eventType) }}</span>
+                      <span v-if="row.mediaPath" class="status-chip status-chip--media">媒体</span>
+                      <span v-if="row.contextToken" class="status-chip status-chip--ready">上下文</span>
+                    </div>
+                    <span class="event-row__time">{{ formatDateTime(row.createTime) }}</span>
                   </div>
-                  <span class="event-row__time">{{ formatDateTime(row.createTime) }}</span>
-                </div>
 
-                <div class="event-row__route" :title="eventRouteText(row)">
-                  {{ eventRouteText(row) }}
-                </div>
+                  <div class="event-row__route" :title="eventRouteText(row)">
+                    {{ eventRouteText(row) }}
+                  </div>
 
-                <div class="event-row__preview">
-                  {{ eventPreview(row) }}
-                </div>
+                  <div class="event-row__preview">
+                    {{ eventPreview(row) }}
+                  </div>
 
-                <div class="event-row__footer">
-                  <span>ID {{ row.id }}</span>
-                  <span v-if="row.mediaMimeType">{{ row.mediaMimeType }}</span>
-                  <span v-if="resolveEventPeerId(row)">{{ resolveEventPeerId(row) }}</span>
-                </div>
-              </button>
-            </div>
-            <n-empty
-              v-else
-              :description="detailLoading ? '正在加载事件...' : '当前条件下暂无事件'"
-              class="panel-empty panel-empty--fill"
-            />
-
-            <div class="panel-pagination">
-              <n-pagination
-                :page="detailPaginationState.page"
-                :page-size="detailPaginationState.pageSize"
-                :item-count="detailPaginationState.itemCount"
-                :page-sizes="[10, 20, 50]"
-                show-size-picker
-                @update:page="handleDetailPageChange"
-                @update:page-size="handleDetailPageSizeChange"
+                  <div class="event-row__footer">
+                    <span>ID {{ row.id }}</span>
+                    <span v-if="row.mediaMimeType">{{ row.mediaMimeType }}</span>
+                    <span v-if="resolveEventPeerId(row)">{{ resolveEventPeerId(row) }}</span>
+                  </div>
+                </button>
+              </div>
+              <n-empty
+                v-else
+                :description="detailLoading ? '正在加载事件...' : '当前条件下暂无事件'"
+                class="panel-empty panel-empty--fill"
               />
+
+              <div class="panel-pagination">
+                <n-pagination
+                  :page="detailPaginationState.page"
+                  :page-size="detailPaginationState.pageSize"
+                  :item-count="detailPaginationState.itemCount"
+                  :page-sizes="[10, 20, 50]"
+                  show-size-picker
+                  @update:page="handleDetailPageChange"
+                  @update:page-size="handleDetailPageSizeChange"
+                />
+              </div>
+            </div>
+
+            <div v-else-if="workspaceTab === 'dispatches'" class="tracking-workspace">
+              <div class="toolbar toolbar--dispatch-filters">
+                <n-input
+                  v-model:value="dispatchFilters.contactId"
+                  clearable
+                  placeholder="联系人ID"
+                  @keyup.enter="applyDispatchSearch"
+                />
+                <n-input
+                  v-model:value="dispatchFilters.keyword"
+                  clearable
+                  placeholder="关键词 / SourceId / 错误信息"
+                  @keyup.enter="applyDispatchSearch"
+                />
+                <n-select
+                  v-model:value="dispatchFilters.dispatchType"
+                  :options="eventTypeOptions"
+                  clearable
+                  placeholder="分发类型"
+                />
+                <n-select
+                  v-model:value="dispatchFilters.dispatchStatus"
+                  :options="dispatchStatusOptions"
+                  clearable
+                  placeholder="分发状态"
+                />
+                <n-input
+                  v-model:value="dispatchFilters.traceId"
+                  clearable
+                  placeholder="TraceId"
+                  @keyup.enter="applyDispatchSearch"
+                />
+                <n-button v-permission="'/api/wechathlink/admin/events/dispatches'" @click="applyDispatchSearch">查询</n-button>
+              </div>
+
+              <div v-if="dispatchRows.length" class="event-list">
+                <button
+                  v-for="row in dispatchRows"
+                  :key="row.id"
+                  type="button"
+                  :class="['event-row', selectedDispatch?.id === row.id ? 'event-row--active' : '']"
+                  @click="selectDispatch(row)"
+                >
+                  <div class="event-row__top">
+                    <div class="event-row__chips">
+                      <span :class="['status-chip', `status-chip--${dispatchStatusTone(row.dispatchStatus)}`]">
+                        {{ row.dispatchStatus || '-' }}
+                      </span>
+                      <span class="status-chip status-chip--type">{{ eventTypeText(row.dispatchType) }}</span>
+                      <span v-if="row.mediaAssetCount" class="status-chip status-chip--media">媒体 {{ row.mediaAssetCount }}</span>
+                    </div>
+                    <span class="event-row__time">{{ formatDateTime(row.createTime) }}</span>
+                  </div>
+
+                  <div class="event-row__route" :title="dispatchRouteText(row)">
+                    {{ dispatchRouteText(row) }}
+                  </div>
+
+                  <div class="event-row__preview">
+                    {{ dispatchPreview(row) }}
+                  </div>
+
+                  <div class="event-row__footer">
+                    <span>ID {{ row.id }}</span>
+                    <span v-if="row.traceId">Trace {{ row.traceId }}</span>
+                    <span v-if="row.eventId">事件 {{ row.eventId }}</span>
+                  </div>
+                </button>
+              </div>
+              <n-empty
+                v-else
+                :description="dispatchLoading ? '正在加载分发记录...' : '当前条件下暂无分发记录'"
+                class="panel-empty panel-empty--fill"
+              />
+
+              <div class="panel-pagination">
+                <n-pagination
+                  :page="dispatchPaginationState.page"
+                  :page-size="dispatchPaginationState.pageSize"
+                  :item-count="dispatchPaginationState.itemCount"
+                  :page-sizes="[10, 20, 50]"
+                  show-size-picker
+                  @update:page="handleDispatchPageChange"
+                  @update:page-size="handleDispatchPageSizeChange"
+                />
+              </div>
+            </div>
+
+            <div v-else class="tracking-workspace">
+              <div class="toolbar toolbar--asset-filters">
+                <n-input
+                  v-model:value="assetFilters.keyword"
+                  clearable
+                  placeholder="文件名 / 路径 / SHA256 / 错误信息"
+                  @keyup.enter="applyAssetSearch"
+                />
+                <n-select
+                  v-model:value="assetFilters.assetType"
+                  :options="eventTypeOptions"
+                  clearable
+                  placeholder="资产类型"
+                />
+                <n-select
+                  v-model:value="assetFilters.downloadStatus"
+                  :options="assetStatusOptions"
+                  clearable
+                  placeholder="资产状态"
+                />
+                <n-button v-permission="'/api/wechathlink/admin/events/media-assets'" @click="applyAssetSearch">查询</n-button>
+              </div>
+
+              <div v-if="assetRows.length" class="event-list">
+                <button
+                  v-for="row in assetRows"
+                  :key="row.id"
+                  type="button"
+                  :class="['event-row', selectedAsset?.id === row.id ? 'event-row--active' : '']"
+                  @click="selectAsset(row)"
+                >
+                  <div class="event-row__top">
+                    <div class="event-row__chips">
+                      <span :class="['status-chip', `status-chip--${assetStatusTone(row.downloadStatus)}`]">
+                        {{ row.downloadStatus || '-' }}
+                      </span>
+                      <span class="status-chip status-chip--type">{{ eventTypeText(row.assetType) }}</span>
+                      <span v-if="row.dispatchId" class="status-chip status-chip--info">分发 {{ row.dispatchId }}</span>
+                    </div>
+                    <span class="event-row__time">{{ formatDateTime(row.createTime) }}</span>
+                  </div>
+
+                  <div class="event-row__route" :title="row.fileName || row.storagePath || '-'">
+                    {{ row.fileName || '未命名媒体' }}
+                  </div>
+
+                  <div class="event-row__preview">
+                    {{ assetPreview(row) }}
+                  </div>
+
+                  <div class="event-row__footer">
+                    <span>ID {{ row.id }}</span>
+                    <span v-if="row.eventId">事件 {{ row.eventId }}</span>
+                    <span v-if="row.mimeType">{{ row.mimeType }}</span>
+                  </div>
+                </button>
+              </div>
+              <n-empty
+                v-else
+                :description="assetLoading ? '正在加载媒体资产...' : '当前条件下暂无媒体资产'"
+                class="panel-empty panel-empty--fill"
+              />
+
+              <div class="panel-pagination">
+                <n-pagination
+                  :page="assetPaginationState.page"
+                  :page-size="assetPaginationState.pageSize"
+                  :item-count="assetPaginationState.itemCount"
+                  :page-sizes="[10, 20, 50]"
+                  show-size-picker
+                  @update:page="handleAssetPageChange"
+                  @update:page-size="handleAssetPageSizeChange"
+                />
+              </div>
             </div>
           </div>
         </main>
@@ -234,16 +406,19 @@
           <div class="events-panel">
             <div class="events-panel__header">
               <div>
-                <strong>事件详情</strong>
-                <span>{{ selectedEvent ? `事件 #${selectedEvent.id}` : '从事件流中选择一条记录查看详情。' }}</span>
+                <strong>{{ detailPanelTitle }}</strong>
+                <span>{{ detailPanelDescription }}</span>
               </div>
 
-              <div v-if="selectedEvent?.mediaPath" class="events-panel__actions">
+              <div v-if="workspaceTab === 'events' && selectedEvent?.mediaPath" class="events-panel__actions">
                 <n-button v-permission="'btn:wechathlink_events:media'" size="small" tertiary @click="openPreview(selectedEvent)">预览媒体</n-button>
+              </div>
+              <div v-else-if="workspaceTab === 'assets' && selectedAsset?.canPreview" class="events-panel__actions">
+                <n-button v-permission="'btn:wechathlink_events:media'" size="small" tertiary @click="openAssetPreview(selectedAsset)">预览媒体</n-button>
               </div>
             </div>
 
-            <template v-if="selectedEvent">
+            <template v-if="workspaceTab === 'events' && selectedEvent">
               <n-tabs v-model:value="detailTab" type="line" animated>
                 <n-tab-pane name="detail" tab="详情" />
                 <n-tab-pane name="media" tab="媒体" />
@@ -294,7 +469,22 @@
                   </section>
 
                   <section class="detail-card">
-                    <div class="detail-card__title">消息内容</div>
+                    <div class="detail-card__head">
+                      <div>
+                        <div class="detail-card__title">消息内容</div>
+                        <div class="detail-card__desc">从事件直接回到会话工作台，继续围绕该联系人处理。</div>
+                      </div>
+                      <div class="events-panel__actions">
+                        <n-button
+                          v-if="selectedEventContactId"
+                          size="small"
+                          tertiary
+                          @click="openConversationWorkspace(selectedAccount?.wechatAccountId, selectedEventContactId, selectedEvent.eventType)"
+                        >
+                          转到会话
+                        </n-button>
+                      </div>
+                    </div>
                     <div v-if="selectedEvent.bodyText" class="detail-text">{{ selectedEvent.bodyText }}</div>
                     <div v-else class="detail-empty">当前事件没有文本内容。</div>
                   </section>
@@ -366,8 +556,8 @@
                 <section class="detail-card">
                   <div class="detail-card__head">
                     <div>
-                      <div class="detail-card__title">联系人上下文</div>
-                      <div class="detail-card__desc">同账号联系人集合，可直接过滤到某个联系人事件。</div>
+                      <div class="detail-card__title">会话上下文</div>
+                      <div class="detail-card__desc">查看同账号下的联系人集合，并直接过滤到某个会话链路。</div>
                     </div>
 
                     <div class="toolbar toolbar--compact">
@@ -403,8 +593,11 @@
 
                       <div class="contact-rail__chips">
                         <span class="status-chip status-chip--neutral">{{ directionText(item.lastDirection) }}</span>
-                        <span :class="['status-chip', item.hasContextToken ? 'status-chip--ready' : 'status-chip--muted']">
-                          {{ item.hasContextToken ? '可回复' : '无上下文' }}
+                        <span :class="['status-chip', item.canReply ? 'status-chip--ready' : 'status-chip--muted']">
+                          {{ replyStatusText(item) }}
+                        </span>
+                        <span v-if="item.replyWindowExpiresAt" class="status-chip status-chip--neutral">
+                          {{ windowStatusText(item.windowStatus) }}
                         </span>
                         <span class="status-chip status-chip--neutral">总 {{ item.totalCount || 0 }}</span>
                       </div>
@@ -428,7 +621,210 @@
                 </section>
               </div>
             </template>
-            <n-empty v-else description="请选择一条事件查看详情" class="panel-empty panel-empty--fill" />
+            <template v-else-if="workspaceTab === 'dispatches' && selectedDispatch">
+              <div class="detail-scroll">
+                <section class="detail-card">
+                  <div class="detail-card__head">
+                    <div>
+                      <div class="detail-card__title">分发联动</div>
+                      <div class="detail-card__desc">从分发记录回跳事件流或会话工作台，继续追踪或处理。</div>
+                    </div>
+                    <div class="events-panel__actions">
+                      <n-button v-if="selectedDispatch.eventId" size="small" tertiary @click="focusEventRecord(selectedDispatch.eventId, selectedDispatch.peerUserId)">
+                        查看关联事件
+                      </n-button>
+                      <n-button
+                        v-permission="'btn:wechathlink_events:retrydispatch'"
+                        size="small"
+                        tertiary
+                        :disabled="retryDispatching || !canRetrySelectedDispatch"
+                        @click="retrySelectedDispatch"
+                      >
+                        {{ retryDispatching ? '重试中...' : '重试发送' }}
+                      </n-button>
+                      <n-button
+                        v-if="selectedDispatch.peerUserId"
+                        size="small"
+                        tertiary
+                        @click="openConversationWorkspace(selectedDispatch.wechatAccountId, selectedDispatch.peerUserId, selectedDispatch.dispatchType)"
+                      >
+                        转到会话
+                      </n-button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="detail-card detail-card--grid">
+                  <div class="detail-field">
+                    <span class="detail-field__label">分发ID</span>
+                    <strong>{{ selectedDispatch.id }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">状态</span>
+                    <strong>{{ selectedDispatch.dispatchStatus || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">账号</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedDispatch.accountName || selectedDispatch.accountCode || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">联系人</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedDispatch.peerUserId || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">类型</span>
+                    <strong>{{ eventTypeText(selectedDispatch.dispatchType) }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">重试次数</span>
+                    <strong>{{ selectedDispatch.retryCount || 0 }}</strong>
+                  </div>
+                  <div class="detail-field detail-field--full">
+                    <span class="detail-field__label">TraceId</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedDispatch.traceId || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">来源类型</span>
+                    <strong>{{ selectedDispatch.sourceType || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">来源ID</span>
+                    <strong>{{ selectedDispatch.sourceId || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">关联事件</span>
+                    <strong>{{ selectedDispatch.eventId || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">媒体资产</span>
+                    <strong>{{ selectedDispatch.mediaAssetCount || 0 }}</strong>
+                  </div>
+                  <div class="detail-field detail-field--full">
+                    <span class="detail-field__label">错误信息</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedDispatch.errorMessage || '无' }}</strong>
+                  </div>
+                </section>
+
+                <section class="detail-card detail-card--json">
+                  <pre>{{ formattedDispatchPayload }}</pre>
+                </section>
+              </div>
+            </template>
+            <template v-else-if="workspaceTab === 'assets' && selectedAsset">
+              <div class="detail-scroll">
+                <section class="detail-card">
+                  <div class="detail-card__head">
+                    <div>
+                      <div class="detail-card__title">资产联动</div>
+                      <div class="detail-card__desc">从媒体资产回跳关联事件、分发或会话，沿着业务链路继续排查。</div>
+                    </div>
+                    <div class="events-panel__actions">
+                      <n-button v-if="selectedAsset.eventId" size="small" tertiary @click="focusEventRecord(selectedAsset.eventId, selectedAsset.peerUserId)">
+                        查看关联事件
+                      </n-button>
+                      <n-button v-if="selectedAsset.dispatchId" size="small" tertiary @click="focusDispatchRecord(selectedAsset.dispatchId)">
+                        查看关联分发
+                      </n-button>
+                      <n-button
+                        v-if="selectedAsset.peerUserId"
+                        size="small"
+                        tertiary
+                        @click="openConversationWorkspace(selectedAsset.wechatAccountId, selectedAsset.peerUserId, selectedAsset.assetType)"
+                      >
+                        转到会话
+                      </n-button>
+                    </div>
+                  </div>
+                </section>
+
+                <section class="detail-card detail-card--grid">
+                  <div class="detail-field">
+                    <span class="detail-field__label">资产ID</span>
+                    <strong>{{ selectedAsset.id }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">状态</span>
+                    <strong>{{ selectedAsset.downloadStatus || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">账号</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedAsset.accountName || selectedAsset.accountCode || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">类型</span>
+                    <strong>{{ eventTypeText(selectedAsset.assetType) }}</strong>
+                  </div>
+                  <div class="detail-field detail-field--full">
+                    <span class="detail-field__label">文件名</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedAsset.fileName || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">事件ID</span>
+                    <strong>{{ selectedAsset.eventId || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">分发ID</span>
+                    <strong>{{ selectedAsset.dispatchId || '-' }}</strong>
+                  </div>
+                  <div class="detail-field">
+                    <span class="detail-field__label">MIME</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedAsset.mimeType || '-' }}</strong>
+                  </div>
+                  <div class="detail-field detail-field--full">
+                    <span class="detail-field__label">SHA256</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedAsset.sha256 || '-' }}</strong>
+                  </div>
+                  <div class="detail-field detail-field--full">
+                    <span class="detail-field__label">存储路径</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedAsset.storagePath || '-' }}</strong>
+                  </div>
+                  <div class="detail-field detail-field--full">
+                    <span class="detail-field__label">错误信息</span>
+                    <strong class="detail-field__value detail-field__value--wrap">{{ selectedAsset.errorMessage || '无' }}</strong>
+                  </div>
+                </section>
+
+                <section class="detail-card">
+                  <div class="detail-card__title">资产预览</div>
+                  <div v-if="selectedAsset.canPreview" class="detail-media">
+                    <img
+                      v-if="selectedAsset.assetType === 'image'"
+                      :src="assetMediaUrl(selectedAsset)"
+                      alt="asset-media"
+                      class="detail-media__image"
+                      @click="openAssetPreview(selectedAsset)"
+                    />
+                    <audio
+                      v-else-if="selectedAsset.assetType === 'voice'"
+                      :src="assetMediaUrl(selectedAsset)"
+                      controls
+                      class="detail-media__audio"
+                    />
+                    <video
+                      v-else-if="selectedAsset.assetType === 'video'"
+                      :src="assetMediaUrl(selectedAsset)"
+                      controls
+                      class="detail-media__video"
+                    />
+                    <div v-else class="detail-media__file">{{ selectedAsset.fileName || 'media-file' }}</div>
+
+                    <div class="detail-media__actions">
+                      <n-button v-permission="'btn:wechathlink_events:media'" size="small" tertiary @click="openAssetPreview(selectedAsset)">查看</n-button>
+                      <a
+                        :href="assetMediaUrl(selectedAsset)"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="detail-media__link"
+                      >
+                        新窗口
+                      </a>
+                    </div>
+                  </div>
+                  <div v-else class="detail-empty">当前资产没有可预览媒体，可能只有落盘记录或下载失败记录。</div>
+                </section>
+              </div>
+            </template>
+            <n-empty v-else :description="emptyDetailDescription" class="panel-empty panel-empty--fill" />
           </div>
         </aside>
       </section>
@@ -478,12 +874,16 @@
 </template>
 
 <script setup>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { useMessage } from 'naive-ui'
 import api from '../../api.js'
 import { ensureArray } from '../../utils/http'
 import ModalFrame from '../../components/ModalFrame.vue'
 
 const EVENT_FILTER_STORAGE_KEY = 'wechathlink:events:filters'
+const router = useRouter()
+const message = useMessage()
 
 const summaryKeyword = ref('')
 const summaryRows = ref([])
@@ -512,9 +912,46 @@ const detailFilters = reactive({
   hasMedia: null,
   dateRange: null
 })
+const focusedEventId = ref(null)
+const workspaceTab = ref('events')
 const selectedEvent = ref(null)
 const detailTab = ref('detail')
 let detailRequestSeq = 0
+
+const dispatchRows = ref([])
+const dispatchLoading = ref(false)
+const dispatchPaginationState = reactive({
+  page: 1,
+  pageSize: 10,
+  itemCount: 0
+})
+const dispatchFilters = reactive({
+  contactId: '',
+  keyword: '',
+  dispatchType: null,
+  dispatchStatus: null,
+  traceId: ''
+})
+const focusedDispatchId = ref(null)
+const selectedDispatch = ref(null)
+let dispatchRequestSeq = 0
+const retryDispatching = ref(false)
+
+const assetRows = ref([])
+const assetLoading = ref(false)
+const assetPaginationState = reactive({
+  page: 1,
+  pageSize: 10,
+  itemCount: 0
+})
+const assetFilters = reactive({
+  keyword: '',
+  assetType: null,
+  downloadStatus: null
+})
+const focusedAssetId = ref(null)
+const selectedAsset = ref(null)
+let assetRequestSeq = 0
 
 const contactsKeyword = ref('')
 const contactRows = ref([])
@@ -547,6 +984,17 @@ const hasMediaOptions = [
   { label: '仅无媒体', value: 0 }
 ]
 
+const dispatchStatusOptions = [
+  { label: '已创建', value: 'CREATED' },
+  { label: '已发送', value: 'SENT' },
+  { label: '失败', value: 'FAILED' }
+]
+
+const assetStatusOptions = [
+  { label: '已就绪', value: 'READY' },
+  { label: '失败', value: 'FAILED' }
+]
+
 const selectedAccount = computed(() => summaryRows.value.find((item) => item.wechatAccountId === selectedAccountId.value) || null)
 const runningAccountCount = computed(() => summaryRows.value.filter((item) => `${item.pollStatus || ''}`.toUpperCase() === 'RUNNING').length)
 const abnormalAccountCount = computed(() => summaryRows.value.filter((item) => isAbnormalAccount(item)).length)
@@ -558,6 +1006,55 @@ const latestVisibleEventAt = computed(() => {
   }
   return new Date(Math.max(...timestamps)).toISOString()
 })
+const workspaceTitle = computed(() => {
+  const map = {
+    events: '链路事件流',
+    dispatches: '分发记录',
+    assets: '媒体资产'
+  }
+  return map[workspaceTab.value] || '追踪工作区'
+})
+const workspaceDescription = computed(() => {
+  if (!selectedAccount.value) {
+    return '请选择账号后查看当前追踪工作区。'
+  }
+  const accountId = selectedAccount.value.wechatAccountId
+  if (workspaceTab.value === 'dispatches') {
+    return `微信账号 #${accountId} 的分发记录，聚焦 trace、状态、来源事件与媒体留痕。`
+  }
+  if (workspaceTab.value === 'assets') {
+    return `微信账号 #${accountId} 的媒体资产，聚焦文件落地、SHA256、下载状态与关联分发。`
+  }
+  return `微信账号 #${accountId} 的链路事件流，支持按联系人、方向、媒体与类型排查。`
+})
+const detailPanelTitle = computed(() => {
+  if (workspaceTab.value === 'dispatches') {
+    return '分发详情'
+  }
+  if (workspaceTab.value === 'assets') {
+    return '资产详情'
+  }
+  return '链路详情'
+})
+const detailPanelDescription = computed(() => {
+  if (workspaceTab.value === 'dispatches') {
+    return selectedDispatch.value ? `分发 #${selectedDispatch.value.id}` : '从分发记录中选择一条记录查看详情。'
+  }
+  if (workspaceTab.value === 'assets') {
+    return selectedAsset.value ? `资产 #${selectedAsset.value.id}` : '从媒体资产中选择一条记录查看详情。'
+  }
+  return selectedEvent.value ? `事件 #${selectedEvent.value.id}` : '从链路事件流中选择一条记录查看详情。'
+})
+const emptyDetailDescription = computed(() => {
+  if (workspaceTab.value === 'dispatches') {
+    return '请选择一条分发记录查看详情'
+  }
+  if (workspaceTab.value === 'assets') {
+    return '请选择一条媒体资产查看详情'
+  }
+  return '请选择一条事件查看详情'
+})
+const canRetrySelectedDispatch = computed(() => `${selectedDispatch.value?.dispatchStatus || ''}`.trim().toUpperCase() === 'FAILED')
 
 const previewTitle = computed(() => {
   if (!previewEvent.value) {
@@ -579,6 +1076,17 @@ const formattedRawJson = computed(() => {
   const rawJson = selectedEvent.value?.rawJson
   if (!rawJson) {
     return '当前事件没有原始 JSON'
+  }
+  try {
+    return JSON.stringify(JSON.parse(rawJson), null, 2)
+  } catch (error) {
+    return rawJson
+  }
+})
+const formattedDispatchPayload = computed(() => {
+  const rawJson = selectedDispatch.value?.payloadJson
+  if (!rawJson) {
+    return '当前分发没有 payload JSON'
   }
   try {
     return JSON.stringify(JSON.parse(rawJson), null, 2)
@@ -626,6 +1134,7 @@ async function loadDetailEvents() {
   try {
     const payload = await api.listEvents({
       wechatAccountId: selectedAccount.value.wechatAccountId,
+      eventId: focusedEventId.value,
       contactId: detailFilters.contactId,
       keyword: detailFilters.keyword,
       direction: detailFilters.direction,
@@ -652,6 +1161,94 @@ async function loadDetailEvents() {
       detailLoading.value = false
     }
   }
+}
+
+async function loadDispatches() {
+  if (!selectedAccount.value?.wechatAccountId) {
+    dispatchRows.value = []
+    dispatchPaginationState.itemCount = 0
+    selectedDispatch.value = null
+    return
+  }
+  const requestSeq = ++dispatchRequestSeq
+  dispatchLoading.value = true
+  try {
+    const payload = await api.listEventDispatches({
+      wechatAccountId: selectedAccount.value.wechatAccountId,
+      dispatchId: focusedDispatchId.value,
+      contactId: dispatchFilters.contactId,
+      keyword: dispatchFilters.keyword,
+      dispatchType: dispatchFilters.dispatchType,
+      dispatchStatus: dispatchFilters.dispatchStatus,
+      traceId: dispatchFilters.traceId,
+      pageNum: dispatchPaginationState.page,
+      pageSize: dispatchPaginationState.pageSize
+    })
+    if (requestSeq !== dispatchRequestSeq) {
+      return
+    }
+    dispatchRows.value = ensureArray(payload?.list)
+    dispatchPaginationState.itemCount = Number(payload?.total || 0)
+    if (!dispatchRows.value.length) {
+      selectedDispatch.value = null
+      return
+    }
+    const matched = dispatchRows.value.find((item) => item.id === selectedDispatch.value?.id)
+    selectedDispatch.value = matched || dispatchRows.value[0]
+  } finally {
+    if (requestSeq === dispatchRequestSeq) {
+      dispatchLoading.value = false
+    }
+  }
+}
+
+async function loadMediaAssets() {
+  if (!selectedAccount.value?.wechatAccountId) {
+    assetRows.value = []
+    assetPaginationState.itemCount = 0
+    selectedAsset.value = null
+    return
+  }
+  const requestSeq = ++assetRequestSeq
+  assetLoading.value = true
+  try {
+    const payload = await api.listEventMediaAssets({
+      wechatAccountId: selectedAccount.value.wechatAccountId,
+      assetId: focusedAssetId.value,
+      keyword: assetFilters.keyword,
+      assetType: assetFilters.assetType,
+      downloadStatus: assetFilters.downloadStatus,
+      pageNum: assetPaginationState.page,
+      pageSize: assetPaginationState.pageSize
+    })
+    if (requestSeq !== assetRequestSeq) {
+      return
+    }
+    assetRows.value = ensureArray(payload?.list)
+    assetPaginationState.itemCount = Number(payload?.total || 0)
+    if (!assetRows.value.length) {
+      selectedAsset.value = null
+      return
+    }
+    const matched = assetRows.value.find((item) => item.id === selectedAsset.value?.id)
+    selectedAsset.value = matched || assetRows.value[0]
+  } finally {
+    if (requestSeq === assetRequestSeq) {
+      assetLoading.value = false
+    }
+  }
+}
+
+async function loadActiveWorkspace() {
+  if (workspaceTab.value === 'dispatches') {
+    await loadDispatches()
+    return
+  }
+  if (workspaceTab.value === 'assets') {
+    await loadMediaAssets()
+    return
+  }
+  await Promise.all([loadDetailEvents(), loadContacts()])
 }
 
 async function loadContacts() {
@@ -693,6 +1290,9 @@ async function selectAccount(row, options = {}) {
   const changed = selectedAccountId.value !== row.wechatAccountId
   selectedAccountId.value = row.wechatAccountId
   if (changed && !options.silentReset) {
+    focusedEventId.value = null
+    focusedDispatchId.value = null
+    focusedAssetId.value = null
     detailFilters.contactId = ''
     detailFilters.keyword = ''
     contactsKeyword.value = ''
@@ -703,9 +1303,21 @@ async function selectAccount(row, options = {}) {
     detailFilters.eventType = null
     detailPaginationState.page = 1
     contactsPaginationState.page = 1
+    dispatchPaginationState.page = 1
+    assetPaginationState.page = 1
+    dispatchFilters.contactId = ''
+    dispatchFilters.keyword = ''
+    dispatchFilters.dispatchType = null
+    dispatchFilters.dispatchStatus = null
+    dispatchFilters.traceId = ''
+    assetFilters.keyword = ''
+    assetFilters.assetType = null
+    assetFilters.downloadStatus = null
+    selectedDispatch.value = null
+    selectedAsset.value = null
   }
   persistEventFilterState()
-  await Promise.all([loadDetailEvents(), loadContacts()])
+  await loadActiveWorkspace()
 }
 
 function selectEvent(row) {
@@ -713,13 +1325,102 @@ function selectEvent(row) {
   detailTab.value = 'detail'
 }
 
+function selectDispatch(row) {
+  selectedDispatch.value = row
+}
+
+function selectAsset(row) {
+  selectedAsset.value = row
+}
+
+async function focusEventRecord(eventId, contactId = '') {
+  if (!eventId) {
+    return
+  }
+  focusedEventId.value = eventId
+  detailPaginationState.page = 1
+  if (contactId) {
+    detailFilters.contactId = contactId
+  }
+  if (workspaceTab.value !== 'events') {
+    workspaceTab.value = 'events'
+    return
+  }
+  await loadDetailEvents()
+}
+
+async function focusDispatchRecord(dispatchId) {
+  if (!dispatchId) {
+    return
+  }
+  focusedDispatchId.value = dispatchId
+  dispatchPaginationState.page = 1
+  if (workspaceTab.value !== 'dispatches') {
+    workspaceTab.value = 'dispatches'
+    return
+  }
+  await loadDispatches()
+}
+
+async function focusAssetRecord(assetId) {
+  if (!assetId) {
+    return
+  }
+  focusedAssetId.value = assetId
+  assetPaginationState.page = 1
+  if (workspaceTab.value !== 'assets') {
+    workspaceTab.value = 'assets'
+    return
+  }
+  await loadMediaAssets()
+}
+
+function openConversationWorkspace(accountId, contactId, eventType) {
+  if (!accountId || !contactId) {
+    return
+  }
+  router.push({
+    path: '/messages',
+    query: {
+      accountId: String(accountId),
+      contactId,
+      ...(eventType ? { eventType } : {})
+    }
+  })
+}
+
+async function retrySelectedDispatch() {
+  if (!selectedDispatch.value?.id || retryDispatching.value || !canRetrySelectedDispatch.value) {
+    return
+  }
+  retryDispatching.value = true
+  try {
+    const result = await api.retryDispatch({ dispatchId: selectedDispatch.value.id })
+    focusedDispatchId.value = Number(result?.dispatchId || 0) || null
+    focusedEventId.value = Number(result?.eventId || 0) || null
+    await Promise.all([loadDispatches(), loadDetailEvents(), loadMediaAssets(), loadSummary()])
+    message.success(`已创建新的重试分发 #${result?.dispatchId || '-'}`)
+  } finally {
+    retryDispatching.value = false
+  }
+}
+
 function clearSelection() {
   selectedAccountId.value = null
+  focusedEventId.value = null
+  focusedDispatchId.value = null
+  focusedAssetId.value = null
   detailRows.value = []
+  dispatchRows.value = []
+  assetRows.value = []
   contactRows.value = []
   selectedEvent.value = null
+  selectedDispatch.value = null
+  selectedAsset.value = null
   summaryPaginationState.itemCount = 0
   detailPaginationState.itemCount = 0
+  dispatchPaginationState.itemCount = 0
+  assetPaginationState.itemCount = 0
   contactsPaginationState.itemCount = 0
 }
 async function applySummarySearch() {
@@ -728,9 +1429,24 @@ async function applySummarySearch() {
 }
 
 async function applyDetailSearch() {
+  focusedEventId.value = null
   detailPaginationState.page = 1
   persistEventFilterState()
   await loadDetailEvents()
+}
+
+async function applyDispatchSearch() {
+  focusedDispatchId.value = null
+  dispatchPaginationState.page = 1
+  persistEventFilterState()
+  await loadDispatches()
+}
+
+async function applyAssetSearch() {
+  focusedAssetId.value = null
+  assetPaginationState.page = 1
+  persistEventFilterState()
+  await loadMediaAssets()
 }
 
 async function applyContactsSearch() {
@@ -740,15 +1456,28 @@ async function applyContactsSearch() {
 
 async function clearEventFilters() {
   summaryKeyword.value = ''
+  focusedEventId.value = null
+  focusedDispatchId.value = null
+  focusedAssetId.value = null
   detailFilters.contactId = ''
   detailFilters.keyword = ''
   detailFilters.direction = null
   detailFilters.eventType = null
   detailFilters.hasMedia = null
   detailFilters.dateRange = null
+  dispatchFilters.contactId = ''
+  dispatchFilters.keyword = ''
+  dispatchFilters.dispatchType = null
+  dispatchFilters.dispatchStatus = null
+  dispatchFilters.traceId = ''
+  assetFilters.keyword = ''
+  assetFilters.assetType = null
+  assetFilters.downloadStatus = null
   contactsKeyword.value = ''
   summaryPaginationState.page = 1
   detailPaginationState.page = 1
+  dispatchPaginationState.page = 1
+  assetPaginationState.page = 1
   contactsPaginationState.page = 1
   persistEventFilterState()
   await loadSummary()
@@ -784,11 +1513,30 @@ function openPreview(row) {
   previewModalVisible.value = true
 }
 
+function openAssetPreview(row) {
+  if (!row?.eventId) {
+    return
+  }
+  openPreview({
+    id: row.eventId,
+    mediaPath: row.storagePath,
+    mediaFileName: row.fileName,
+    eventType: row.assetType
+  })
+}
+
 function eventMediaUrl(row) {
   if (!row?.id || !row?.mediaPath) {
     return ''
   }
   return api.getEventMediaUrl(row.id)
+}
+
+function assetMediaUrl(row) {
+  if (!row?.eventId || !row?.canPreview) {
+    return ''
+  }
+  return api.getEventMediaUrl(row.eventId)
 }
 
 function handleSummaryPageChange(page) {
@@ -811,6 +1559,28 @@ function handleDetailPageSizeChange(pageSize) {
   detailPaginationState.pageSize = pageSize
   detailPaginationState.page = 1
   loadDetailEvents()
+}
+
+function handleDispatchPageChange(page) {
+  dispatchPaginationState.page = page
+  loadDispatches()
+}
+
+function handleDispatchPageSizeChange(pageSize) {
+  dispatchPaginationState.pageSize = pageSize
+  dispatchPaginationState.page = 1
+  loadDispatches()
+}
+
+function handleAssetPageChange(page) {
+  assetPaginationState.page = page
+  loadMediaAssets()
+}
+
+function handleAssetPageSizeChange(pageSize) {
+  assetPaginationState.pageSize = pageSize
+  assetPaginationState.page = 1
+  loadMediaAssets()
 }
 
 function handleContactsPageChange(page) {
@@ -857,6 +1627,28 @@ function directionTone(value) {
   return `${value || ''}`.trim().toLowerCase() === 'outbound' ? 'info' : 'success'
 }
 
+function dispatchStatusTone(value) {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  if (normalized === 'SENT') {
+    return 'success'
+  }
+  if (normalized === 'FAILED') {
+    return 'danger'
+  }
+  return 'warning'
+}
+
+function assetStatusTone(value) {
+  const normalized = `${value || ''}`.trim().toUpperCase()
+  if (normalized === 'READY') {
+    return 'success'
+  }
+  if (normalized === 'FAILED') {
+    return 'danger'
+  }
+  return 'warning'
+}
+
 function directionText(value) {
   const map = {
     inbound: '入站',
@@ -893,6 +1685,72 @@ function eventPreview(row) {
     return row.mediaFileName
   }
   return `${eventTypeText(row.eventType)}事件`
+}
+
+function dispatchRouteText(row) {
+  if (!row) {
+    return '-'
+  }
+  const contact = row.peerUserId || '-'
+  const source = row.sourceType || 'REQUEST'
+  return `${contact} | 来源 ${source}`
+}
+
+function dispatchPreview(row) {
+  if (!row) {
+    return '-'
+  }
+  if (row.errorMessage) {
+    return row.errorMessage
+  }
+  if (row.eventId) {
+    return `关联事件 #${row.eventId}${row.eventType ? ` · ${eventTypeText(row.eventType)}` : ''}`
+  }
+  return row.traceId ? `Trace ${row.traceId}` : '等待关联业务对象'
+}
+
+function assetPreview(row) {
+  if (!row) {
+    return '-'
+  }
+  if (row.errorMessage) {
+    return row.errorMessage
+  }
+  if (row.storagePath) {
+    return row.storagePath
+  }
+  if (row.sha256) {
+    return row.sha256
+  }
+  return `${eventTypeText(row.assetType)}资产`
+}
+
+function windowStatusText(value) {
+  const map = {
+    OPEN: '窗口开启',
+    CLOSING_SOON: '即将关闭',
+    CLOSED: '窗口关闭'
+  }
+  return map[value] || value || '窗口关闭'
+}
+
+function replyStatusText(contact) {
+  if (!contact) {
+    return '不可回复'
+  }
+  if (contact.canReply) {
+    return '可回复'
+  }
+  if (contact.windowStatus === 'CLOSING_SOON') {
+    return '窗口临近关闭'
+  }
+  if (contact.windowStatus === 'CLOSED') {
+    return '需等待新消息'
+  }
+  if (contact.contextStatus === 'INVALID') {
+    return '上下文无效'
+  }
+  return '不可回复'
 }
 
 function resolveEventPeerId(row) {
@@ -985,6 +1843,7 @@ function persistEventFilterState() {
   }
   window.localStorage.setItem(EVENT_FILTER_STORAGE_KEY, JSON.stringify({
     selectedAccountId: selectedAccountId.value,
+    workspaceTab: workspaceTab.value,
     summaryKeyword: summaryKeyword.value,
     detailFilters: {
       contactId: detailFilters.contactId,
@@ -993,6 +1852,18 @@ function persistEventFilterState() {
       eventType: detailFilters.eventType,
       hasMedia: detailFilters.hasMedia,
       dateRange: Array.isArray(detailFilters.dateRange) ? detailFilters.dateRange : null
+    },
+    dispatchFilters: {
+      contactId: dispatchFilters.contactId,
+      keyword: dispatchFilters.keyword,
+      dispatchType: dispatchFilters.dispatchType,
+      dispatchStatus: dispatchFilters.dispatchStatus,
+      traceId: dispatchFilters.traceId
+    },
+    assetFilters: {
+      keyword: assetFilters.keyword,
+      assetType: assetFilters.assetType,
+      downloadStatus: assetFilters.downloadStatus
     }
   }))
 }
@@ -1008,6 +1879,7 @@ function restoreEventFilterState() {
   try {
     const parsed = JSON.parse(raw)
     selectedAccountId.value = parsed?.selectedAccountId || null
+    workspaceTab.value = parsed?.workspaceTab || 'events'
     summaryKeyword.value = parsed?.summaryKeyword || ''
     detailFilters.contactId = parsed?.detailFilters?.contactId || ''
     detailFilters.keyword = parsed?.detailFilters?.keyword || ''
@@ -1015,9 +1887,34 @@ function restoreEventFilterState() {
     detailFilters.eventType = parsed?.detailFilters?.eventType || null
     detailFilters.hasMedia = parsed?.detailFilters?.hasMedia ?? null
     detailFilters.dateRange = Array.isArray(parsed?.detailFilters?.dateRange) ? parsed.detailFilters.dateRange : null
+    dispatchFilters.contactId = parsed?.dispatchFilters?.contactId || ''
+    dispatchFilters.keyword = parsed?.dispatchFilters?.keyword || ''
+    dispatchFilters.dispatchType = parsed?.dispatchFilters?.dispatchType || null
+    dispatchFilters.dispatchStatus = parsed?.dispatchFilters?.dispatchStatus || null
+    dispatchFilters.traceId = parsed?.dispatchFilters?.traceId || ''
+    assetFilters.keyword = parsed?.assetFilters?.keyword || ''
+    assetFilters.assetType = parsed?.assetFilters?.assetType || null
+    assetFilters.downloadStatus = parsed?.assetFilters?.downloadStatus || null
   } catch (error) {
   }
 }
+
+watch(workspaceTab, () => {
+  persistEventFilterState()
+  if (!selectedAccount.value) {
+    return
+  }
+  if (workspaceTab.value === 'events') {
+    loadDetailEvents()
+    loadContacts()
+    return
+  }
+  if (workspaceTab.value === 'dispatches') {
+    loadDispatches()
+    return
+  }
+  loadMediaAssets()
+})
 
 onMounted(() => {
   restoreEventFilterState()
@@ -1197,6 +2094,26 @@ onMounted(() => {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) minmax(0, 1.4fr) 140px 160px 140px minmax(0, 1.2fr) auto auto;
   gap: 10px;
+}
+
+.toolbar--dispatch-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) 140px 140px minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.toolbar--asset-filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) 160px 160px auto;
+  gap: 10px;
+}
+
+.tracking-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  flex: 1;
 }
 
 .account-list,
@@ -1647,6 +2564,8 @@ onMounted(() => {
   .detail-card--grid,
   .detail-meta-grid,
   .toolbar--filters,
+  .toolbar--dispatch-filters,
+  .toolbar--asset-filters,
   .toolbar--compact {
     grid-template-columns: 1fr;
   }

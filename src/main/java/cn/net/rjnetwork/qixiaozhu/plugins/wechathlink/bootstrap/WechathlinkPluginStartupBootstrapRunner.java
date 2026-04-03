@@ -20,6 +20,9 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
@@ -56,8 +59,74 @@ public class WechathlinkPluginStartupBootstrapRunner implements ApplicationRunne
 
     private void executeSchema() throws Exception {
         String mode = dataSourceSpec.sqlite() ? "sqlite" : "mysql";
-        String classpath = "db/changelog/sql/" + mode + "/v1.0.0/001-core.sql";
-        ClassPathResource resource = new ClassPathResource(classpath);
+        ensureSchemaHistoryTable();
+        PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver(getClass().getClassLoader());
+        Resource[] resources = resolver.getResources("classpath*:db/changelog/sql/" + mode + "/**/*.sql");
+        List<Resource> scripts = new ArrayList<>();
+        for (Resource resource : resources) {
+            if (resource != null && resource.isReadable() && resource.getFilename() != null) {
+                scripts.add(resource);
+            }
+        }
+        scripts.sort(Comparator.comparing(this::resourceKey));
+        for (Resource resource : scripts) {
+            String resourceKey = resourceKey(resource);
+            if (schemaScriptExecuted(resourceKey)) {
+                continue;
+            }
+            executeSqlScript(resource);
+            markSchemaScriptExecuted(resourceKey);
+        }
+        log.info("wechathlink schema initialized in mode={}", mode);
+    }
+
+    private void ensureSchemaHistoryTable() {
+        if (dataSourceSpec.sqlite()) {
+            jdbcTemplate.execute("""
+                    CREATE TABLE IF NOT EXISTS wcf_schema_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        script_key TEXT NOT NULL UNIQUE,
+                        executed_at TEXT NOT NULL
+                    )
+                    """);
+            return;
+        }
+        jdbcTemplate.execute("""
+                CREATE TABLE IF NOT EXISTS wcf_schema_history (
+                    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+                    script_key VARCHAR(512) NOT NULL,
+                    executed_at DATETIME NOT NULL,
+                    UNIQUE KEY uk_wcf_schema_history_script_key (script_key)
+                )
+                """);
+    }
+
+    private boolean schemaScriptExecuted(String scriptKey) {
+        Long count = jdbcTemplate.queryForObject(
+                "SELECT COUNT(1) FROM wcf_schema_history WHERE script_key = ?",
+                Long.class,
+                scriptKey
+        );
+        return count != null && count > 0;
+    }
+
+    private void markSchemaScriptExecuted(String scriptKey) {
+        if (dataSourceSpec.sqlite()) {
+            jdbcTemplate.update(
+                    "INSERT INTO wcf_schema_history (script_key, executed_at) VALUES (?, ?)",
+                    scriptKey,
+                    LocalDateTime.now().toString()
+            );
+            return;
+        }
+        jdbcTemplate.update(
+                "INSERT INTO wcf_schema_history (script_key, executed_at) VALUES (?, ?)",
+                scriptKey,
+                LocalDateTime.now()
+        );
+    }
+
+    private void executeSqlScript(Resource resource) throws Exception {
         String script = new String(resource.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         for (String statement : script.split(";\\s*(\\r?\\n|$)")) {
             String sql = statement.trim();
@@ -65,7 +134,19 @@ public class WechathlinkPluginStartupBootstrapRunner implements ApplicationRunne
                 jdbcTemplate.execute(sql);
             }
         }
-        log.info("wechathlink schema initialized in mode={}", mode);
+    }
+
+    private String resourceKey(Resource resource) {
+        try {
+            String uri = resource.getURI().toString();
+            int index = uri.indexOf("db/changelog/sql/");
+            if (index >= 0) {
+                return uri.substring(index);
+            }
+            return resource.getFilename() == null ? uri : resource.getFilename();
+        } catch (Exception ex) {
+            return resource.getFilename() == null ? String.valueOf(resource) : resource.getFilename();
+        }
     }
 
     private void ensureMicroappInfo() {

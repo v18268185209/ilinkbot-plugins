@@ -1,16 +1,22 @@
 package cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.poller;
 
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccount;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkBotRuntime;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkEvent;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkLog;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkMediaAsset;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkPeerContext;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkBotRuntimeMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkEventMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkLogMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkMediaAssetMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkPeerContextMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.impl.WechathlinkRuntimeConfigService;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkWebhookService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkApi;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkModels;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.WechathlinkReplyWindowSupport;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
@@ -19,9 +25,11 @@ import org.springframework.stereotype.Component;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,25 +43,34 @@ import java.util.concurrent.Future;
 public class WechathlinkPollerManager {
 
     private final WechathlinkAccountMapper accountMapper;
+    private final WechathlinkBotRuntimeMapper botRuntimeMapper;
     private final WechathlinkEventMapper eventMapper;
     private final WechathlinkLogMapper logMapper;
+    private final WechathlinkMediaAssetMapper mediaAssetMapper;
     private final WechathlinkPeerContextMapper peerContextMapper;
     private final WechathlinkRuntimeConfigService runtimeConfigService;
+    private final WechathlinkWebhookService webhookService;
     private final IlinkApi ilinkClient;
     private final ExecutorService executorService = Executors.newCachedThreadPool();
     private final Map<Long, Future<?>> runningTasks = new ConcurrentHashMap<>();
 
     public WechathlinkPollerManager(WechathlinkAccountMapper accountMapper,
+                                    WechathlinkBotRuntimeMapper botRuntimeMapper,
                                     WechathlinkEventMapper eventMapper,
                                     WechathlinkLogMapper logMapper,
+                                    WechathlinkMediaAssetMapper mediaAssetMapper,
                                     WechathlinkPeerContextMapper peerContextMapper,
                                     WechathlinkRuntimeConfigService runtimeConfigService,
+                                    WechathlinkWebhookService webhookService,
                                     IlinkApi ilinkClient) {
         this.accountMapper = accountMapper;
+        this.botRuntimeMapper = botRuntimeMapper;
         this.eventMapper = eventMapper;
         this.logMapper = logMapper;
+        this.mediaAssetMapper = mediaAssetMapper;
         this.peerContextMapper = peerContextMapper;
         this.runtimeConfigService = runtimeConfigService;
+        this.webhookService = webhookService;
         this.ilinkClient = ilinkClient;
     }
 
@@ -123,6 +140,7 @@ public class WechathlinkPollerManager {
                 account.setLastError("");
                 account.setLastPollAt(LocalDateTime.now());
                 accountMapper.updateById(account);
+                touchRuntimeOnline(account);
                 if (response.msgs() != null) {
                     for (IlinkModels.WeixinMessage message : response.msgs()) {
                         saveInboundMessage(account, message, runtime);
@@ -140,6 +158,7 @@ public class WechathlinkPollerManager {
                     failed.setLastError(ex.getMessage());
                     failed.setLastPollAt(LocalDateTime.now());
                     accountMapper.updateById(failed);
+                    touchRuntimeOffline(failed, ex.getMessage());
                 }
                 createLog(accountId, "ERROR", "poll failed", "poller", "{\"error\":\"" + ex.getMessage().replace("\"", "'") + "\"}");
                 try {
@@ -155,25 +174,32 @@ public class WechathlinkPollerManager {
     private void saveInboundMessage(WechathlinkAccount account,
                                     IlinkModels.WeixinMessage message,
                                     WechathlinkRuntimeConfigService.RuntimeSettings runtime) {
+        String eventType = detectEventType(message);
         String mediaPath = "";
         String mediaFileName = "";
         String mediaMimeType = "";
+        String mediaErrorMessage = "";
+        byte[] mediaBytes = null;
+        IlinkModels.MessageItem mediaItem = firstInboundMediaItem(message);
         try {
-            IlinkModels.MessageItem mediaItem = firstInboundMediaItem(message);
             if (mediaItem != null) {
                 IlinkModels.DownloadedMedia downloadedMedia = ilinkClient.downloadMessageMedia(runtime.cdnBaseUrl(), mediaItem, runtime.pollTimeoutMs());
-                mediaPath = saveMedia(runtime.mediaDir(), account.getAccountCode(), message.messageId(), downloadedMedia.fileName(), downloadedMedia.bytes());
+                mediaBytes = downloadedMedia.bytes();
+                mediaPath = saveMedia(runtime.mediaDir(), account.getAccountCode(), message.messageId(), downloadedMedia.fileName(), mediaBytes);
                 mediaFileName = downloadedMedia.fileName();
                 mediaMimeType = downloadedMedia.mimeType();
             }
         } catch (Exception ex) {
+            mediaFileName = resolveInboundFileName(mediaItem);
+            mediaMimeType = resolveInboundMimeType(mediaItem);
+            mediaErrorMessage = ex.getMessage();
             createLog(account.getId(), "ERROR", "download inbound media failed", "media", "{\"error\":\"" + ex.getMessage().replace("\"", "'") + "\"}");
         }
 
         WechathlinkEvent event = new WechathlinkEvent();
         event.setWechatAccountId(account.getId());
         event.setDirection("inbound");
-        event.setEventType(detectEventType(message));
+        event.setEventType(eventType);
         event.setFromUserId(message.fromUserId());
         event.setToUserId(message.toUserId());
         event.setMessageId(message.messageId());
@@ -186,6 +212,10 @@ public class WechathlinkPollerManager {
         event.setOwnerUserId(account.getOwnerUserId());
         fillAudit(account, event);
         eventMapper.insert(event);
+        webhookService.deliverEvent(account, event);
+        if (mediaItem != null) {
+            createMediaAssetRecord(account, event, mediaPath, mediaFileName, mediaMimeType, mediaBytes, mediaErrorMessage);
+        }
 
         if (message.fromUserId() != null && !message.fromUserId().isBlank() && message.contextToken() != null && !message.contextToken().isBlank()) {
             WechathlinkPeerContext peerContext = peerContextMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<WechathlinkPeerContext>()
@@ -199,12 +229,21 @@ public class WechathlinkPollerManager {
                 peerContext.setPeerUserId(message.fromUserId());
                 peerContext.setContextToken(message.contextToken());
                 peerContext.setLastMessageAt(LocalDateTime.now());
+                peerContext.setLastInboundAt(LocalDateTime.now());
+                peerContext.setReplyWindowExpiresAt(WechathlinkReplyWindowSupport.calculateReplyWindowExpiresAt(peerContext.getLastInboundAt()));
+                peerContext.setWindowStatus(WechathlinkReplyWindowSupport.resolveWindowStatus(peerContext.getReplyWindowExpiresAt()));
+                peerContext.setContextStatus(WechathlinkReplyWindowSupport.resolveContextStatus(peerContext.getContextToken(), peerContext.getReplyWindowExpiresAt()));
                 fillAudit(account, peerContext);
                 peerContextMapper.insert(peerContext);
             } else {
+                LocalDateTime now = LocalDateTime.now();
                 peerContext.setContextToken(message.contextToken());
-                peerContext.setLastMessageAt(LocalDateTime.now());
-                peerContext.setUpdateTime(LocalDateTime.now());
+                peerContext.setLastMessageAt(now);
+                peerContext.setLastInboundAt(now);
+                peerContext.setReplyWindowExpiresAt(WechathlinkReplyWindowSupport.calculateReplyWindowExpiresAt(now));
+                peerContext.setWindowStatus(WechathlinkReplyWindowSupport.resolveWindowStatus(peerContext.getReplyWindowExpiresAt()));
+                peerContext.setContextStatus(WechathlinkReplyWindowSupport.resolveContextStatus(peerContext.getContextToken(), peerContext.getReplyWindowExpiresAt()));
+                peerContext.setUpdateTime(now);
                 peerContext.setUpdateUserId(account.getOwnerUserId());
                 peerContextMapper.updateById(peerContext);
             }
@@ -257,6 +296,78 @@ public class WechathlinkPollerManager {
         return "unknown";
     }
 
+    private void createMediaAssetRecord(WechathlinkAccount account,
+                                        WechathlinkEvent event,
+                                        String mediaPath,
+                                        String mediaFileName,
+                                        String mediaMimeType,
+                                        byte[] mediaBytes,
+                                        String errorMessage) {
+        if (account == null || event == null || event.getId() == null) {
+            return;
+        }
+        WechathlinkMediaAsset mediaAsset = new WechathlinkMediaAsset();
+        mediaAsset.setWechatAccountId(account.getId());
+        mediaAsset.setEventId(event.getId());
+        mediaAsset.setDispatchId(null);
+        mediaAsset.setAssetType(defaultValue(event.getEventType(), "file"));
+        mediaAsset.setStoragePath(defaultValue(mediaPath, ""));
+        mediaAsset.setFileName(defaultValue(mediaFileName, ""));
+        mediaAsset.setMimeType(defaultValue(mediaMimeType, ""));
+        mediaAsset.setSha256(sha256Hex(mediaBytes));
+        mediaAsset.setDownloadStatus(hasText(errorMessage) ? "FAILED" : "READY");
+        mediaAsset.setErrorMessage(defaultValue(errorMessage, ""));
+        fillAudit(account, mediaAsset);
+        mediaAssetMapper.insert(mediaAsset);
+    }
+
+    private String resolveInboundFileName(IlinkModels.MessageItem item) {
+        if (item == null || item.type() == null) {
+            return "";
+        }
+        return switch (item.type()) {
+            case 2 -> "image.jpg";
+            case 3 -> "voice.silk";
+            case 4 -> item.fileItem() != null && hasText(item.fileItem().fileName()) ? item.fileItem().fileName().trim() : "file.bin";
+            case 5 -> "video.mp4";
+            default -> "";
+        };
+    }
+
+    private String resolveInboundMimeType(IlinkModels.MessageItem item) {
+        if (item == null || item.type() == null) {
+            return "";
+        }
+        return switch (item.type()) {
+            case 2 -> "image/jpeg";
+            case 3 -> "audio/silk";
+            case 4 -> "application/octet-stream";
+            case 5 -> "video/mp4";
+            default -> "";
+        };
+    }
+
+    private String sha256Hex(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) {
+            return "";
+        }
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            digest.update(bytes);
+            return HexFormat.of().formatHex(digest.digest());
+        } catch (Exception ex) {
+            return "";
+        }
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private String defaultValue(String value, String fallback) {
+        return hasText(value) ? value.trim() : fallback;
+    }
+
     private String extractBodyText(IlinkModels.WeixinMessage message) {
         if (message.itemList() == null) {
             return "";
@@ -306,5 +417,43 @@ public class WechathlinkPollerManager {
         log.setIsDeleted(0);
         log.setStatus(1);
         logMapper.insert(log);
+    }
+
+    private void touchRuntimeOnline(WechathlinkAccount account) {
+        if (account == null || account.getCurrentRuntimeId() == null) {
+            return;
+        }
+        WechathlinkBotRuntime runtime = botRuntimeMapper.selectById(account.getCurrentRuntimeId());
+        if (runtime == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        runtime.setRuntimeStatus("ONLINE");
+        runtime.setLastHeartbeatAt(now);
+        if (runtime.getLastOnlineAt() == null) {
+            runtime.setLastOnlineAt(now);
+        }
+        runtime.setLastError("");
+        runtime.setIsActive(1);
+        runtime.setUpdateTime(now);
+        runtime.setUpdateUserId(account.getOwnerUserId());
+        botRuntimeMapper.updateById(runtime);
+    }
+
+    private void touchRuntimeOffline(WechathlinkAccount account, String errorMessage) {
+        if (account == null || account.getCurrentRuntimeId() == null) {
+            return;
+        }
+        WechathlinkBotRuntime runtime = botRuntimeMapper.selectById(account.getCurrentRuntimeId());
+        if (runtime == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        runtime.setRuntimeStatus("OFFLINE");
+        runtime.setLastOfflineAt(now);
+        runtime.setLastError(errorMessage);
+        runtime.setUpdateTime(now);
+        runtime.setUpdateUserId(account.getOwnerUserId());
+        botRuntimeMapper.updateById(runtime);
     }
 }

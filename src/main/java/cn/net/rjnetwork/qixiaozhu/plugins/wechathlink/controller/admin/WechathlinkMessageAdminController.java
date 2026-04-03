@@ -61,4 +61,21 @@ public class WechathlinkMessageAdminController extends WechathlinkBaseController
     public ResultBody<Map<String, Object>> sendMedia(@RequestBody Map<String, Object> body) {
         return renderSuccess(messageService.sendMedia(body));
     }
+
+    @PostMapping("/retry-dispatch")
+    @Operation(summary = "Wechat hlink retry dispatch")
+    @WebLayer(name = "Wechat hlink retry dispatch", code = "/api/wechathlink/admin/messages/retry-dispatch")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> retryDispatch(@RequestBody Map<String, Object> body) {
+        Long dispatchId = null;
+        if (body != null && body.get("dispatchId") != null) {
+            Object value = body.get("dispatchId");
+            if (value instanceof Number number) {
+                dispatchId = number.longValue();
+            } else {
+                dispatchId = Long.valueOf(String.valueOf(value));
+            }
+        }
+        return renderSuccess(messageService.retryDispatch(dispatchId));
+    }
 }

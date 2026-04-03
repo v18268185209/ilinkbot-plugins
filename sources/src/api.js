@@ -44,8 +44,11 @@ const api = {
     return httpPost(`${adminPrefix}/accounts/member/save`, data)
   },
 
-  startLoginSession(baseUrl, config = {}) {
-    return httpPost(`${adminPrefix}/login/start`, compactParams({ baseUrl }), config)
+  startLoginSession(payload = {}, config = {}) {
+    if (typeof payload === 'string') {
+      return httpPost(`${adminPrefix}/login/start`, compactParams({ baseUrl: payload }), config)
+    }
+    return httpPost(`${adminPrefix}/login/start`, compactParams(payload), config)
   },
 
   getLoginStatus(sessionCode, config = {}) {
@@ -63,6 +66,18 @@ const api = {
 
   listEventContacts(params = {}) {
     return httpGet(`${adminPrefix}/events/contacts`, {
+      params: compactParams(params)
+    })
+  },
+
+  listEventDispatches(params = {}) {
+    return httpGet(`${adminPrefix}/events/dispatches`, {
+      params: compactParams(params)
+    })
+  },
+
+  listEventMediaAssets(params = {}) {
+    return httpGet(`${adminPrefix}/events/media-assets`, {
       params: compactParams(params)
     })
   },
@@ -96,6 +111,10 @@ const api = {
     return httpPost(`${adminPrefix}/messages/send-media`, data)
   },
 
+  retryDispatch(data) {
+    return httpPost(`${adminPrefix}/messages/retry-dispatch`, data)
+  },
+
   getSettings() {
     return httpGet(`${adminPrefix}/settings/get`)
   },
@@ -108,6 +127,32 @@ const api = {
     return httpGet(`${adminPrefix}/audit/list`, {
       params: compactParams(params)
     })
+  },
+
+  getPlatformSummary() {
+    return httpGet(`${adminPrefix}/platform/summary`)
+  },
+
+  listPlatformRequests(params = {}) {
+    return httpGet(`${adminPrefix}/platform/requests`, {
+      params: compactParams(params)
+    })
+  },
+
+  listPlatformDeliveries(params = {}) {
+    return httpGet(`${adminPrefix}/platform/deliveries`, {
+      params: compactParams(params)
+    })
+  },
+
+  getPlatformDeliveryDetail(id) {
+    return httpGet(`${adminPrefix}/platform/deliveries/detail`, {
+      params: compactParams({ id })
+    })
+  },
+
+  retryPlatformDelivery(data) {
+    return httpPost(`${adminPrefix}/platform/deliveries/retry`, data)
   },
 
   getAuditDetail(id) {
