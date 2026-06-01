@@ -297,8 +297,7 @@ public class IlinkClient implements IlinkApi {
         body.put("base_info", Map.of("channel_version", channelVersion));
         IlinkModels.SendMessageResponse response = post(baseUrl + "/ilink/bot/sendmessage", token, body, timeoutMs, IlinkModels.SendMessageResponse.class);
         if ((response.errcode() != null && response.errcode() != 0) || (response.ret() != null && response.ret() != 0)) {
-            throw new IllegalStateException((response.errmsg() == null ? "sendmessage returned non-zero status" : response.errmsg())
-                    + " (ret=" + response.ret() + ", errcode=" + response.errcode() + ")");
+            throw new IlinkException(response.errcode(), response.errmsg());
         }
     }
 
@@ -412,7 +411,7 @@ public class IlinkClient implements IlinkApi {
     private void ensureSuccess(String operation, Integer ret, Integer errcode, String errmsg) {
         if ((ret != null && ret != 0) || (errcode != null && errcode != 0)) {
             String message = StringUtils.hasText(errmsg) ? errmsg.trim() : operation + " returned non-zero status";
-            throw new IllegalStateException(message + " (ret=" + ret + ", errcode=" + errcode + ")");
+            throw new IlinkException(errcode, message + " (ret=" + ret + ", errcode=" + errcode + ")");
         }
     }
 

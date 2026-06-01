@@ -16,6 +16,7 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditSe
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkMessageService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkWebhookService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkApi;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkException;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkModels;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.WechathlinkReplyWindowSupport;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.WechathlinkSendRateLimiter;
@@ -202,6 +203,20 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
             successPayload.put("sentCount", sentCount);
             auditService.recordSuccess(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", event.getId(), "outbound text message sent (" + sentCount + " part(s))", successPayload);
             return Map.of("ok", true, "eventId", event.getId(), "dispatchId", dispatch.getId(), "traceId", traceId, "sentCount", sentCount);
+        } catch (IlinkException ex) {
+            // Classify error and set appropriate dispatch status
+            String status = ex.isRetryable() ? "FAILED" : "PERMANENTLY_FAILED";
+            String errorMsg = ex.getMessage();
+            if (ex.isContentError()) {
+                errorMsg = "内容审核不通过: " + ex.getMessage();
+                status = "PERMANENTLY_FAILED"; // 内容错误重试也没用
+            } else if (ex.isConfigError()) {
+                errorMsg = "配置/权限错误: " + ex.getMessage();
+                status = "PERMANENTLY_FAILED"; // 配置错误重试也没用
+            }
+            updateDispatchRecord(dispatch, status, errorMsg, "REQUEST", traceId);
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", null, errorMsg, ex, auditPayload);
+            throw ex;
         } catch (RuntimeException ex) {
             updateDispatchRecord(dispatch, "FAILED", ex.getMessage(), "REQUEST", traceId);
             auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", null, "outbound text message send failed", ex, auditPayload);
@@ -304,6 +319,19 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
                     "mediaAssetId", mediaAsset.getId(),
                     "traceId", traceId
             );
+        } catch (IlinkException ex) {
+            String status = ex.isRetryable() ? "FAILED" : "PERMANENTLY_FAILED";
+            String errorMsg = ex.getMessage();
+            if (ex.isContentError()) {
+                errorMsg = "内容审核不通过: " + ex.getMessage();
+                status = "PERMANENTLY_FAILED";
+            } else if (ex.isConfigError()) {
+                errorMsg = "配置/权限错误: " + ex.getMessage();
+                status = "PERMANENTLY_FAILED";
+            }
+            updateDispatchRecord(dispatch, status, errorMsg, "REQUEST", traceId);
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE", null, errorMsg, ex, auditPayload);
+            throw ex;
         } catch (RuntimeException ex) {
             updateDispatchRecord(dispatch, "FAILED", ex.getMessage(), "REQUEST", traceId);
             auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE", null, "outbound media message send failed", ex, auditPayload);

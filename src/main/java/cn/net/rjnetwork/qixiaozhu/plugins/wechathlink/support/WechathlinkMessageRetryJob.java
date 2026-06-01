@@ -138,9 +138,16 @@ public class WechathlinkMessageRetryJob {
             dispatch.setUpdateTime(LocalDateTime.now());
             dispatchMapper.updateById(dispatch);
 
-            // The actual retry logic depends on the dispatch type
-            // For now, we update the status so the admin can see it's being retried
-            // Full retry requires re-executing the original send logic
+            // Check if the error is retryable based on the stored error message
+            String errorMsg = dispatch.getErrorMessage();
+            if (errorMsg != null && (errorMsg.contains("内容审核不通过") || errorMsg.contains("配置/权限错误"))) {
+                dispatch.setDispatchStatus("PERMANENTLY_FAILED");
+                dispatch.setErrorMessage(errorMsg + " [auto-retry skipped: non-retryable error]");
+                dispatch.setUpdateTime(LocalDateTime.now());
+                dispatchMapper.updateById(dispatch);
+                log.info("dispatch {} skipped auto-retry due to non-retryable error: {}", dispatch.getId(), errorMsg);
+                continue;
+            }
             log.info("dispatch {} marked for retry (attempt {})", dispatch.getId(), dispatch.getRetryCount());
 
         } catch (InterruptedException ex) {
