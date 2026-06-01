@@ -25,6 +25,7 @@ import java.security.SecureRandom;
 import java.time.Duration;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,6 +37,11 @@ public class IlinkClient implements IlinkApi {
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.parse("application/json; charset=utf-8");
     private static final MediaType OCTET_STREAM_MEDIA_TYPE = MediaType.parse("application/octet-stream");
+
+    /** WeChat ilink limits: max items per message */
+    private static final int MAX_ITEMS_PER_MESSAGE = 10;
+    /** WeChat ilink limits: max text length per text_item */
+    private static final int MAX_TEXT_LENGTH_PER_ITEM = 2048;
 
     private final ObjectMapper objectMapper = new ObjectMapper()
             .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -154,6 +160,27 @@ public class IlinkClient implements IlinkApi {
     }
 
     @Override
+    public int sendLongTextMessage(String baseUrl, String token, String toUserId, String text, String contextToken, String channelVersion, int timeoutMs, int maxCharsPerMessage) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        if (maxCharsPerMessage <= 0) {
+            maxCharsPerMessage = MAX_TEXT_LENGTH_PER_ITEM;
+        }
+        // Split text into chunks, trying to break at line boundaries or sentence boundaries
+        List<String> chunks = splitText(text, maxCharsPerMessage);
+        int sent = 0;
+        for (String chunk : chunks) {
+            if (chunk == null || chunk.isBlank()) {
+                continue;
+            }
+            sendTextMessage(baseUrl, token, toUserId, chunk, contextToken, channelVersion, timeoutMs);
+            sent++;
+        }
+        return sent;
+    }
+
+    @Override
     public IlinkModels.UploadedMedia uploadLocalMedia(String cdnBaseUrl, String baseUrl, String token, String toUserId, Path filePath, int mediaType, String channelVersion, int timeoutMs) {
         try {
             byte[] plaintext = Files.readAllBytes(filePath);
@@ -236,18 +263,17 @@ public class IlinkClient implements IlinkApi {
     // ========== private: message assembly ==========
 
     private void sendMediaItems(String baseUrl, String token, String toUserId, String contextToken, String text, Map<String, Object> mediaItem, String channelVersion, int timeoutMs) {
-        List<Map<String, Object>> items;
+        List<Map<String, Object>> items = new java.util.ArrayList<>();
         if (StringUtils.hasText(text)) {
-            items = List.of(
-                    Map.of("type", 1, "text_item", Map.of("text", text)),
-                    mediaItem
-            );
-        } else {
-            items = List.of(mediaItem);
+            items.add(Map.of("type", 1, "text_item", Map.of("text", text)));
         }
-        for (Map<String, Object> item : items) {
+        items.add(mediaItem);
+        // Split into batches of MAX_ITEMS_PER_MESSAGE to comply with WeChat limits
+        int batchSize = MAX_ITEMS_PER_MESSAGE;
+        for (int i = 0; i < items.size(); i += batchSize) {
+            List<Map<String, Object>> batch = items.subList(i, Math.min(i + batchSize, items.size()));
             Map<String, Object> msg = baseMessage(toUserId, contextToken);
-            msg.put("item_list", List.of(item));
+            msg.put("item_list", new java.util.ArrayList<>(batch));
             sendMessage(baseUrl, token, msg, channelVersion, timeoutMs);
         }
     }
@@ -423,5 +449,54 @@ public class IlinkClient implements IlinkApi {
 
     private String urlEncode(String value) {
         return URLEncoder.encode(value == null ? "" : value, StandardCharsets.UTF_8);
+    }
+
+    /**
+     * Split long text into chunks that fit within WeChat message limits.
+     * Tries to break at paragraph boundaries, then sentence boundaries, then hard cut.
+     */
+    private List<String> splitText(String text, int maxChars) {
+        List<String> chunks = new ArrayList<>();
+        String remaining = text;
+        while (remaining.length() > maxChars) {
+            // Try to find a good break point
+            int breakAt = findBreakPoint(remaining, maxChars);
+            chunks.add(remaining.substring(0, breakAt).trim());
+            remaining = remaining.substring(breakAt).trim();
+        }
+        if (!remaining.isEmpty()) {
+            chunks.add(remaining);
+        }
+        return chunks;
+    }
+
+    private int findBreakPoint(String text, int maxChars) {
+        int limit = Math.min(maxChars, text.length());
+        // Priority 1: paragraph break (\n\n)
+        int paraBreak = text.lastIndexOf("\n\n", limit);
+        if (paraBreak > 0) {
+            return paraBreak + 2;
+        }
+        // Priority 2: single newline
+        int lineBreak = text.lastIndexOf('\n', limit);
+        if (lineBreak > 0) {
+            return lineBreak + 1;
+        }
+        // Priority 3: sentence end (。！？.!?)
+        for (int i = limit - 1; i > 0; i--) {
+            char c = text.charAt(i);
+            if (c == '。' || c == '！' || c == '？' || c == '.' || c == '!' || c == '?') {
+                return i + 1;
+            }
+        }
+        // Priority 4: comma/semicolon
+        for (int i = limit - 1; i > 0; i--) {
+            char c = text.charAt(i);
+            if (c == '，' || c == '；' || c == ',' || c == ';') {
+                return i + 1;
+            }
+        }
+        // Fallback: hard cut at maxChars
+        return limit;
     }
 }

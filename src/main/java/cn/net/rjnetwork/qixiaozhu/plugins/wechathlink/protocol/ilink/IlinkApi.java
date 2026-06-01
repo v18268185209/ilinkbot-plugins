@@ -17,6 +17,13 @@ public interface IlinkApi {
 
     void sendTextMessage(String baseUrl, String token, String toUserId, String text, String contextToken, String channelVersion, int timeoutMs);
 
+    /**
+     * Send a long text message by splitting it into multiple WeChat messages.
+     * Each message will contain up to {@code maxCharsPerMessage} characters.
+     * Returns the number of messages actually sent.
+     */
+    int sendLongTextMessage(String baseUrl, String token, String toUserId, String text, String contextToken, String channelVersion, int timeoutMs, int maxCharsPerMessage);
+
     void sendImageMessage(String baseUrl, String token, String toUserId, String contextToken, String text, IlinkModels.UploadedMedia uploadedMedia, String channelVersion, int timeoutMs);
 
     void sendVideoMessage(String baseUrl, String token, String toUserId, String contextToken, String text, IlinkModels.UploadedMedia uploadedMedia, String channelVersion, int timeoutMs);

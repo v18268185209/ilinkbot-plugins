@@ -18,6 +18,7 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkWebhook
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkApi;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.protocol.ilink.IlinkModels;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.WechathlinkReplyWindowSupport;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.WechathlinkSendRateLimiter;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -51,6 +52,7 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
     private final IlinkApi ilinkClient;
     private final WechathlinkAuditService auditService;
     private final WechathlinkWebhookService webhookService;
+    private final WechathlinkSendRateLimiter rateLimiter;
 
     public WechathlinkMessageServiceImpl(WechathlinkAccountMapper accountMapper,
                                          WechathlinkEventMapper eventMapper,
@@ -62,7 +64,8 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
                                          WechathlinkRuntimeConfigService runtimeConfigService,
                                          IlinkApi ilinkClient,
                                          WechathlinkAuditService auditService,
-                                         WechathlinkWebhookService webhookService) {
+                                         WechathlinkWebhookService webhookService,
+                                         WechathlinkSendRateLimiter rateLimiter) {
         this.accountMapper = accountMapper;
         this.eventMapper = eventMapper;
         this.logMapper = logMapper;
@@ -74,6 +77,7 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
         this.ilinkClient = ilinkClient;
         this.auditService = auditService;
         this.webhookService = webhookService;
+        this.rateLimiter = rateLimiter;
     }
 
     @Override
@@ -167,13 +171,22 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
         try {
             dispatch = createDispatchRecord(account, toUserId, "text", dispatchPayload, traceId, "REQUEST", traceId);
             var runtime = runtimeConfigService.current();
-            ilinkClient.sendTextMessage(account.getBaseUrl(), account.getBotToken(), toUserId, text, contextToken, "2.0.1", runtime.pollTimeoutMs());
+            // Rate limit to avoid triggering WeChat anti-spam
+            rateLimiter.acquireAndWait(account.getId());
+            // Split long text into multiple messages (WeChat limit: ~2048 chars per text_item, max 10 items per message)
+            int maxCharsPerMsg = 2048;
+            int sentCount = ilinkClient.sendLongTextMessage(account.getBaseUrl(), account.getBotToken(), toUserId, text, contextToken, "2.0.1", runtime.pollTimeoutMs(), maxCharsPerMsg);
+            if (sentCount == 0) {
+                throw new IllegalStateException("no text message was sent");
+            }
+            // Record the first chunk as the primary event for dispatch tracking
+            String firstChunk = text.length() > maxCharsPerMsg ? text.substring(0, maxCharsPerMsg) : text;
             WechathlinkEvent event = new WechathlinkEvent();
             event.setWechatAccountId(account.getId());
             event.setDirection("outbound");
             event.setEventType("text");
             event.setToUserId(toUserId);
-            event.setBodyText(text);
+            event.setBodyText(firstChunk);
             event.setContextToken(contextToken);
             event.setOwnerUserId(account.getOwnerUserId());
             event.setRawJson(writeJson(dispatchPayload));
@@ -182,12 +195,13 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
             webhookService.deliverEvent(account, event);
             updateDispatchRecord(dispatch, "SENT", "", "EVENT", event.getId());
             touchPeerContext(account, toUserId, contextToken);
-            createLog(account.getId(), "INFO", "outbound text message queued", "send-text", event.getRawJson());
+            createLog(account.getId(), "INFO", "outbound text message sent (" + sentCount + " part(s))", "send-text", event.getRawJson());
             Map<String, Object> successPayload = new LinkedHashMap<>(auditPayload);
             successPayload.put("eventId", event.getId());
             successPayload.put("dispatchId", dispatch.getId());
-            auditService.recordSuccess(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", event.getId(), "outbound text message queued", successPayload);
-            return Map.of("ok", true, "eventId", event.getId(), "dispatchId", dispatch.getId(), "traceId", traceId);
+            successPayload.put("sentCount", sentCount);
+            auditService.recordSuccess(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", event.getId(), "outbound text message sent (" + sentCount + " part(s))", successPayload);
+            return Map.of("ok", true, "eventId", event.getId(), "dispatchId", dispatch.getId(), "traceId", traceId, "sentCount", sentCount);
         } catch (RuntimeException ex) {
             updateDispatchRecord(dispatch, "FAILED", ex.getMessage(), "REQUEST", traceId);
             auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", null, "outbound text message send failed", ex, auditPayload);
@@ -228,6 +242,8 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
         try {
             dispatch = createDispatchRecord(account, toUserId, normalizedType, dispatchPayload, traceId, "REQUEST", traceId);
             var runtime = runtimeConfigService.current();
+            // Rate limit to avoid triggering WeChat anti-spam
+            rateLimiter.acquireAndWait(account.getId());
             int uploadType = toUploadType(normalizedType);
             IlinkModels.UploadedMedia uploadedMedia = ilinkClient.uploadLocalMedia(
                     runtime.cdnBaseUrl(),

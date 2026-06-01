@@ -24,4 +24,6 @@ public class WechathlinkMessageDispatch extends WechathlinkAuditEntity {
     private String sourceType;
     private String sourceId;
     private String traceId;
+    /** Number of actual WeChat messages sent for this dispatch (long text may be split) */
+    private Integer sendCount;
 }
