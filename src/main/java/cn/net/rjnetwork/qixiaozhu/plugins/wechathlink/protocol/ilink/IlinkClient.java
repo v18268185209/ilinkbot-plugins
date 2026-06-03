@@ -422,8 +422,15 @@ public class IlinkClient implements IlinkApi {
         if (decoded.length == 16) {
             return decoded;
         }
+        // Some responses return the AES key as a hex string (32 chars) encoded in base64.
+        // After base64 decoding, we get the raw bytes of that hex string — parse them back to 16 bytes.
         if (decoded.length == 32) {
-            return HexFormat.of().parseHex(new String(decoded, StandardCharsets.UTF_8));
+            try {
+                return HexFormat.of().parseHex(new String(decoded, StandardCharsets.UTF_8));
+            } catch (IllegalArgumentException ex) {
+                // Not a valid hex string; the 32 bytes might be the raw key itself
+                return decoded;
+            }
         }
         throw new IllegalStateException("unexpected aes_key length " + decoded.length);
     }

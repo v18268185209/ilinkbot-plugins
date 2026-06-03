@@ -146,7 +146,7 @@ public class WechathlinkMessageRetryJob {
                 dispatch.setUpdateTime(LocalDateTime.now());
                 dispatchMapper.updateById(dispatch);
                 log.info("dispatch {} skipped auto-retry due to non-retryable error: {}", dispatch.getId(), errorMsg);
-                continue;
+                return; // was 'continue' inside try block — compilation error fix
             }
             log.info("dispatch {} marked for retry (attempt {})", dispatch.getId(), dispatch.getRetryCount());
 

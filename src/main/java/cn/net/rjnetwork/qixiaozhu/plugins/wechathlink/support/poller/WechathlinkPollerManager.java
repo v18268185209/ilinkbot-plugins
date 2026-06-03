@@ -133,6 +133,11 @@ public class WechathlinkPollerManager {
                         "2.0.1",
                         runtime.pollTimeoutMs()
                 );
+                // Check for API-level errors in the response
+                if (response.ret() != null && response.ret() != 0) {
+                    throw new IllegalStateException("getUpdates returned non-zero ret=" + response.ret()
+                            + ", errcode=" + response.errcode() + ", errmsg=" + response.errmsg());
+                }
                 if (response.getUpdatesBuf() != null && !response.getUpdatesBuf().isBlank()) {
                     account.setGetUpdatesBuf(response.getUpdatesBuf());
                 }

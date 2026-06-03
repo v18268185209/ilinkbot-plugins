@@ -67,7 +67,8 @@ public final class IlinkErrorCodes {
             case BOT_PUBLISHING_OR_RATE_LIMITED,  // 210205: 频率限制，可重试
                  KV_ERROR,                         // 1003001: KV异常，临时错误
                  DB_OPERATION_FAILED,              // 210201: DB操作失败，临时错误
-                 INTERNAL_ERROR -> true;           // 1110001: 服务器内部错误，可重试
+                 INTERNAL_ERROR,                    // 1110001: 服务器内部错误，可重试
+                 DATA_PARSE_FAILED -> true;         // 1000012: 数据解析失败，临时错误
             default -> false;
         };
     }

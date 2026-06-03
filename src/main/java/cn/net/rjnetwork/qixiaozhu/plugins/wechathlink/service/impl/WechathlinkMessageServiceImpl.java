@@ -215,11 +215,13 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
                 status = "PERMANENTLY_FAILED"; // 配置错误重试也没用
             }
             updateDispatchRecord(dispatch, status, errorMsg, "REQUEST", traceId);
-            auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", null, errorMsg, ex, auditPayload);
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE",
+                    dispatch != null ? dispatch.getId() : null, errorMsg, ex, auditPayload);
             throw ex;
         } catch (RuntimeException ex) {
             updateDispatchRecord(dispatch, "FAILED", ex.getMessage(), "REQUEST", traceId);
-            auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE", null, "outbound text message send failed", ex, auditPayload);
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_TEXT", "MESSAGE",
+                    dispatch != null ? dispatch.getId() : null, "outbound text message send failed", ex, auditPayload);
             throw ex;
         }
     }
@@ -330,11 +332,13 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
                 status = "PERMANENTLY_FAILED";
             }
             updateDispatchRecord(dispatch, status, errorMsg, "REQUEST", traceId);
-            auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE", null, errorMsg, ex, auditPayload);
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE",
+                    dispatch != null ? dispatch.getId() : null, errorMsg, ex, auditPayload);
             throw ex;
         } catch (RuntimeException ex) {
             updateDispatchRecord(dispatch, "FAILED", ex.getMessage(), "REQUEST", traceId);
-            auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE", null, "outbound media message send failed", ex, auditPayload);
+            auditService.recordFailure(account.getId(), "MESSAGE_SEND_MEDIA", "MESSAGE",
+                    dispatch != null ? dispatch.getId() : null, "outbound media message send failed", ex, auditPayload);
             throw ex;
         }
     }
