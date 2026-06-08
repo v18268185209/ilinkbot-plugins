@@ -4,10 +4,12 @@ import cn.net.rjnetwork.qixiaozhu.account.CurrentAccount;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccount;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkAccountMember;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkBotRuntime;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkLog;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.entity.WechathlinkLoginSession;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkAccountMemberMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkBotRuntimeMapper;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkLogMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.mapper.WechathlinkLoginSessionMapper;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAuditService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAccountService;
@@ -42,6 +44,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
     private final IlinkClient ilinkClient;
     private final WechathlinkRuntimeConfigService runtimeConfigService;
     private final WechathlinkAuditService auditService;
+    private final WechathlinkLogMapper logMapper;
 
     public WechathlinkAccountServiceImpl(WechathlinkAccountMapper accountMapper,
                                          WechathlinkAccountMemberMapper memberMapper,
@@ -51,7 +54,8 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
                                          WechathlinkPollerManager pollerManager,
                                          IlinkClient ilinkClient,
                                          WechathlinkRuntimeConfigService runtimeConfigService,
-                                         WechathlinkAuditService auditService) {
+                                         WechathlinkAuditService auditService,
+                                         WechathlinkLogMapper logMapper) {
         this.accountMapper = accountMapper;
         this.memberMapper = memberMapper;
         this.botRuntimeMapper = botRuntimeMapper;
@@ -61,6 +65,7 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         this.ilinkClient = ilinkClient;
         this.runtimeConfigService = runtimeConfigService;
         this.auditService = auditService;
+        this.logMapper = logMapper;
     }
 
     @Override
@@ -514,23 +519,23 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         health.put("accountCode", account.getAccountCode());
         health.put("accountName", account.getAccountName());
         health.put("status", account.getStatus());
-        health.put("loginStatus", defaultValue(account.getLoginStatus(), "UNKNOWN"));
-        health.put("pollStatus", defaultValue(account.getPollStatus(), "UNKNOWN"));
+        health.put("loginStatus", defaultValue(account.getLoginStatus(), "UNKNOWN", "UNKNOWN"));
+        health.put("pollStatus", defaultValue(account.getPollStatus(), "UNKNOWN", "UNKNOWN"));
         health.put("hasBotToken", account.getBotToken() != null && !account.getBotToken().isBlank());
         health.put("pollerRunning", pollerManager.isRunning(account.getId()));
         health.put("runningCount", pollerManager.runningCount());
         health.put("lastPollAt", account.getLastPollAt());
         health.put("lastInboundAt", account.getLastInboundAt());
-        health.put("lastError", defaultValue(account.getLastError(), ""));
+        health.put("lastError", defaultValue(account.getLastError(), "", ""));
         health.put("currentRuntimeId", account.getCurrentRuntimeId());
-        health.put("bindStatus", defaultValue(account.getBindStatus(), "UNBOUND"));
+        health.put("bindStatus", defaultValue(account.getBindStatus(), "UNBOUND", "UNBOUND"));
         // Check runtime status if available
         if (account.getCurrentRuntimeId() != null) {
             WechathlinkBotRuntime runtime = botRuntimeMapper.selectById(account.getCurrentRuntimeId());
             if (runtime != null) {
                 health.put("runtimeStatus", runtime.getRuntimeStatus());
                 health.put("runtimeLastHeartbeat", runtime.getLastHeartbeatAt());
-                health.put("runtimeLastError", defaultValue(runtime.getLastError(), ""));
+                health.put("runtimeLastError", defaultValue(runtime.getLastError(), "", ""));
                 health.put("runtimeIsOnline", "ONLINE".equals(runtime.getRuntimeStatus()));
             } else {
                 health.put("runtimeStatus", "NOT_FOUND");
