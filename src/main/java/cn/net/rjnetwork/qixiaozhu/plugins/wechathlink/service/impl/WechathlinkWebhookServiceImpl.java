@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -73,11 +74,11 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
                         totalSuccess.incrementAndGet();
                     }
                     @Override
-                    public void connectEnd(Call call, okhttp3.InetAddress address, int port) {
+                    public void connectEnd(Call call, InetAddress address, int port) { {
                         // connection established
                     }
                     @Override
-                    public void connectionFailed(Call call, okhttp3.InetAddress address, int port, Response response) {
+                    public void connectionFailed(Call call, InetAddress address, int port, Response response) { {
                         totalTimeout.incrementAndGet();
                         totalFailed.incrementAndGet();
                     }
@@ -293,6 +294,18 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
 
     private String defaultValue(String value, String fallback) {
         return StringUtils.hasText(value) ? value.trim() : fallback;
+    }
+
+    private void fillAudit(WechathlinkWebhookDelivery entity, WechathlinkAccount account) {
+        LocalDateTime now = LocalDateTime.now();
+        entity.setCreateTime(now);
+        entity.setUpdateTime(now);
+        entity.setCreateUserId(account == null ? null : account.getOwnerUserId());
+        entity.setUpdateUserId(account == null ? null : account.getOwnerUserId());
+        entity.setCompanyId(account == null ? null : account.getCompanyId());
+        entity.setDeptId(account == null ? null : account.getDeptId());
+        entity.setIsDeleted(entity.getIsDeleted() == null ? 0 : entity.getIsDeleted());
+        entity.setStatus(entity.getStatus() == null ? 1 : entity.getStatus());
     }
 
     /**

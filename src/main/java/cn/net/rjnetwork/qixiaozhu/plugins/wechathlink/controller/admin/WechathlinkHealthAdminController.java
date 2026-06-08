@@ -23,7 +23,7 @@ import java.util.Map;
  */
 @RestController
 @RequestMapping("/api/wechathlink/admin/health")
-public class WechathlinkHealthAdminController {
+public class WechathlinkHealthAdminController extends WechathlinkBaseController {
 
     private final WechathlinkDashboardService dashboardService;
     private final WechathlinkAccountService accountService;
@@ -52,7 +52,7 @@ public class WechathlinkHealthAdminController {
         health.put("component", "ilinkbot-plugin");
 
         // Poller manager health
-        int runningCount = pollerManager.runningCount();
+        long runningCount = pollerManager.runningCount();
         health.put("pollerRunningCount", runningCount);
         health.put("pollerHealthy", true);
 

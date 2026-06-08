@@ -1019,7 +1019,7 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
                         "eventId", event.getId(),
                         "eventType", eventType,
                         "direction", event.getDirection(),
-                        "peerUserId", event.getPeerUserId(),
+                        "peerUserId", event.getFromUserId() != null ? event.getFromUserId() : event.getToUserId(),
                         "createTime", event.getCreateTime(),
                         "anomaly", "empty-event"
                 ));
