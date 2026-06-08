@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.LinkedHashMap;
 
 @Service
 public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport implements WechathlinkAccountService {
@@ -471,5 +472,114 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
             botRuntimeMapper.updateById(activeRuntime);
         }
         return runtime;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> startPoller(Long id) {
+        WechathlinkAccount account = requireAccount(id);
+        if (account.getStatus() == null || account.getStatus() != 1) {
+            throw new IllegalStateException("account must be enabled to start poller");
+        }
+        if (account.getBotToken() == null || account.getBotToken().isBlank()) {
+            throw new IllegalStateException("account must have a valid bot token before starting poller");
+        }
+        if (pollerManager.isRunning(account.getId())) {
+            return Map.of("ok", true, "message", "poller already running", "accountId", account.getId());
+        }
+        pollerManager.start(account.getId());
+        createPollerLog(account.getId(), "INFO", "Poller started", "start-poller");
+        auditService.recordSuccess(account.getId(), "ACCOUNT_POLLER_START", "ACCOUNT", account.getId(), "poller started", Map.of("accountId", account.getId()));
+        return Map.of("ok", true, "message", "poller started", "accountId", account.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> stopPoller(Long id) {
+        WechathlinkAccount account = requireAccount(id);
+        if (!pollerManager.isRunning(account.getId())) {
+            return Map.of("ok", true, "message", "poller not running", "accountId", account.getId());
+        }
+        pollerManager.stop(account.getId());
+        createPollerLog(account.getId(), "INFO", "Poller stopped", "stop-poller");
+        auditService.recordSuccess(account.getId(), "ACCOUNT_POLLER_STOP", "ACCOUNT", account.getId(), "poller stopped", Map.of("accountId", account.getId()));
+        return Map.of("ok", true, "message", "poller stopped", "accountId", account.getId());
+    }
+
+    @Override
+    public Map<String, Object> healthCheck(Long id) {
+        WechathlinkAccount account = requireAccount(id);
+        Map<String, Object> health = new LinkedHashMap<>();
+        health.put("accountId", account.getId());
+        health.put("accountCode", account.getAccountCode());
+        health.put("accountName", account.getAccountName());
+        health.put("status", account.getStatus());
+        health.put("loginStatus", defaultValue(account.getLoginStatus(), "UNKNOWN"));
+        health.put("pollStatus", defaultValue(account.getPollStatus(), "UNKNOWN"));
+        health.put("hasBotToken", account.getBotToken() != null && !account.getBotToken().isBlank());
+        health.put("pollerRunning", pollerManager.isRunning(account.getId()));
+        health.put("runningCount", pollerManager.runningCount());
+        health.put("lastPollAt", account.getLastPollAt());
+        health.put("lastInboundAt", account.getLastInboundAt());
+        health.put("lastError", defaultValue(account.getLastError(), ""));
+        health.put("currentRuntimeId", account.getCurrentRuntimeId());
+        health.put("bindStatus", defaultValue(account.getBindStatus(), "UNBOUND"));
+        // Check runtime status if available
+        if (account.getCurrentRuntimeId() != null) {
+            WechathlinkBotRuntime runtime = botRuntimeMapper.selectById(account.getCurrentRuntimeId());
+            if (runtime != null) {
+                health.put("runtimeStatus", runtime.getRuntimeStatus());
+                health.put("runtimeLastHeartbeat", runtime.getLastHeartbeatAt());
+                health.put("runtimeLastError", defaultValue(runtime.getLastError(), ""));
+                health.put("runtimeIsOnline", "ONLINE".equals(runtime.getRuntimeStatus()));
+            } else {
+                health.put("runtimeStatus", "NOT_FOUND");
+            }
+        }
+        // Overall health status
+        boolean healthy = true;
+        String reason = "all checks passed";
+        if (account.getStatus() == null || account.getStatus() != 1) {
+            healthy = false;
+            reason = "account disabled";
+        } else if (!pollerManager.isRunning(account.getId())) {
+            healthy = false;
+            reason = "poller not running";
+        } else if ("ERROR".equals(account.getPollStatus())) {
+            healthy = false;
+            reason = "poller in error state: " + account.getLastError();
+        } else if (account.getLastError() != null && !account.getLastError().isBlank()) {
+            // Check if last error is older than 5 minutes (likely transient)
+            healthy = false;
+            reason = "last error: " + account.getLastError();
+        }
+        health.put("healthy", healthy);
+        health.put("reason", reason);
+        return health;
+    }
+
+    private void createPollerLog(Long accountId, String level, String message, String source) {
+        WechathlinkLog log = new WechathlinkLog();
+        log.setWechatAccountId(accountId);
+        log.setLevel(level);
+        log.setMessage(message);
+        log.setSource(source);
+        log.setMetaJson("{}");
+        log.setCreateTime(LocalDateTime.now());
+        log.setUpdateTime(LocalDateTime.now());
+        log.setIsDeleted(0);
+        log.setStatus(1);
+        logMapper.insert(log);
+    }
+
+    private WechathlinkAccount requireAccount(Long id) {
+        if (id == null) {
+            throw new IllegalArgumentException("accountId required");
+        }
+        WechathlinkAccount account = accountMapper.selectById(id);
+        if (account == null) {
+            throw new IllegalArgumentException("wechat account not found");
+        }
+        return account;
     }
 }

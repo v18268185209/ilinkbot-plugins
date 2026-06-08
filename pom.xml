@@ -159,6 +159,18 @@
                 </configuration>
             </plugin>
             <plugin>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
+                <configuration>
+                    <excludes>
+                        <exclude>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </exclude>
+                    </excludes>
+                </configuration>
+            </plugin>
+            <plugin>
                 <groupId>com.zqzqq</groupId>
                 <artifactId>spring-boot3-brick-bootkit-maven-packager</artifactId>
                 <version>4.0.6</version>
@@ -187,4 +199,46 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- Standalone profile: build without brick-bootkit packaging -->
+        <profile>
+            <id>standalone</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.springframework.boot</groupId>
+                        <artifactId>spring-boot-maven-plugin</artifactId>
+                        <configuration>
+                            <excludes>
+                                <exclude>
+                                    <groupId>org.projectlombok</groupId>
+                                    <artifactId>lombok</artifactId>
+                                </exclude>
+                            </excludes>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <!-- Skip frontend build (for CI/CD or manual frontend deployment) -->
+        <profile>
+            <id>skip-frontend</id>
+            <properties>
+                <skip.frontend.build>true</skip.frontend.build>
+            </properties>
+        </profile>
+
+        <!-- Prod profile: skip frontend build, use pre-built assets -->
+        <profile>
+            <id>prod</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <skip.frontend.build>false</skip.frontend.build>
+            </properties>
+        </profile>
+    </profiles>
 </project>

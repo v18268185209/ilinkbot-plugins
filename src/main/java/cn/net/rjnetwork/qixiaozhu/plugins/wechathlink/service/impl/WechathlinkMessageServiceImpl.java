@@ -173,7 +173,12 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
             dispatch = createDispatchRecord(account, toUserId, "text", dispatchPayload, traceId, "REQUEST", traceId);
             var runtime = runtimeConfigService.current();
             // Rate limit to avoid triggering WeChat anti-spam
-            rateLimiter.acquireAndWait(account.getId());
+            try {
+                rateLimiter.acquireAndWait(account.getId());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("rate limiter interrupted", ex);
+            }
             // Split long text into multiple messages (WeChat limit: ~2048 chars per text_item, max 10 items per message)
             int maxCharsPerMsg = 2048;
             int sentCount = ilinkClient.sendLongTextMessage(account.getBaseUrl(), account.getBotToken(), toUserId, text, contextToken, "2.0.1", runtime.pollTimeoutMs(), maxCharsPerMsg);
@@ -260,7 +265,12 @@ public class WechathlinkMessageServiceImpl extends WechathlinkServiceSupport imp
             dispatch = createDispatchRecord(account, toUserId, normalizedType, dispatchPayload, traceId, "REQUEST", traceId);
             var runtime = runtimeConfigService.current();
             // Rate limit to avoid triggering WeChat anti-spam
-            rateLimiter.acquireAndWait(account.getId());
+            try {
+                rateLimiter.acquireAndWait(account.getId());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("rate limiter interrupted", ex);
+            }
             int uploadType = toUploadType(normalizedType);
             IlinkModels.UploadedMedia uploadedMedia = ilinkClient.uploadLocalMedia(
                     runtime.cdnBaseUrl(),

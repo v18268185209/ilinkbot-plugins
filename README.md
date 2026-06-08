@@ -210,17 +210,30 @@ mvn clean package
 
 ## 访问与探活
 
-开放探活接口：
+### 插件级健康检查
 
-- `GET /api/wechathlink/open/health/live`
-- `GET /api/wechathlink/open/health/ready`
-- `GET /api/wechathlink/open/version`
+| 接口 | 说明 |
+| --- | --- |
+| `GET /api/wechathlink/admin/health/plugin` | 插件全局健康检查（返回 poller 状态、账号总数、错误数） |
+| `GET /api/wechathlink/admin/health/account?accountId={id}` | 账号级健康检查（返回轮询状态、运行时状态、最近错误） |
+| `GET /api/wechathlink/open/health/live` | 存活检查 |
+| `GET /api/wechathlink/open/health/ready` | 就绪检查 |
+| `GET /api/wechathlink/open/version` | 版本信息 |
 
-这些接口适合用于：
+### 账号轮询管理
 
-- 服务存活检查
-- 发布后验收
-- 监控系统接入
+| 接口 | 说明 |
+| --- | --- |
+| `POST /api/wechathlink/admin/account/{id}/poller/start` | 手动启动账号轮询 |
+| `POST /api/wechathlink/admin/account/{id}/poller/stop` | 手动停止账号轮询 |
+| `GET /api/wechathlink/admin/account/{id}/health` | 账号健康检查 |
+
+### 自动行为
+
+- 应用启动后自动启动所有已启用且有 botToken 的账号轮询
+- 每 5 分钟自动重试失败的 webhook 投递（最多重试 10 次）
+- 轮询失败时自动记录日志并更新账号错误状态
+- 运行时离线时自动更新 botRuntime 状态
 
 ## 权限说明
 
