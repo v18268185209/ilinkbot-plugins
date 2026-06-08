@@ -8,6 +8,7 @@ import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkWebhook
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.Call;
 import okhttp3.EventListener;
+import okhttp3.EventListener.Factory;
 import okhttp3.MediaType;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -18,7 +19,9 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.net.InetAddress;
+import java.net.Proxy;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
@@ -28,28 +31,29 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Webhook 投递服务 - 生产级增强版
- * 
+ * Webhook 投递服务 — 生产级增强版
+ *
  * 核心能力：
  * - 指数退避重试：1s → 5s → 30s → 2min → 5min（最多10次）
  * - HTTP 超时控制：连接/读/写各 10s
  * - 响应码分类：4xx 不重试，5xx/超时 指数退避重试
  * - 投递统计：总投递数、成功数、失败数、超时数、成功率
- * - 线程安全：统计通过 AtomicInteger/AtomicLong 保障
+ * - 线程安全：统计通过 AtomicLong 保障
  */
 @Service
 @Slf4j
-public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport implements WechathlinkWebhookService {
+public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport
+        implements WechathlinkWebhookService {
 
     private static final MediaType JSON_MEDIA_TYPE = MediaType.get("application/json; charset=utf-8");
     private static final int MAX_DELIVERY_ATTEMPTS = 10;
-    private static final int[] RETRY_DELAYS_SECONDS = {1, 5, 30, 120, 300}; // 指数退避
+    private static final int[] RETRY_DELAYS_SECONDS = { 1, 5, 30, 120, 300 }; // 指数退避
     private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(10);
 
     private final WechathlinkWebhookDeliveryMapper webhookDeliveryMapper;
     private final WechathlinkRuntimeConfigService runtimeConfigService;
     private final OkHttpClient httpClient;
-    
+
     // 投递统计（线程安全）
     private final AtomicLong totalDelivered = new AtomicLong(0);
     private final AtomicLong totalSuccess = new AtomicLong(0);
@@ -57,30 +61,22 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
     private final AtomicLong totalTimeout = new AtomicLong(0);
 
     public WechathlinkWebhookServiceImpl(WechathlinkWebhookDeliveryMapper webhookDeliveryMapper,
-                                         WechathlinkRuntimeConfigService runtimeConfigService) {
+            WechathlinkRuntimeConfigService runtimeConfigService) {
         this.webhookDeliveryMapper = webhookDeliveryMapper;
         this.runtimeConfigService = runtimeConfigService;
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(HTTP_TIMEOUT)
                 .readTimeout(HTTP_TIMEOUT)
                 .writeTimeout(HTTP_TIMEOUT)
-                .eventListener(new EventListener() {
+                .eventListenerFactory(call -> new EventListener() {
                     @Override
                     public void callStart(Call call) {
                         totalDelivered.incrementAndGet();
                     }
+
                     @Override
                     public void callEnd(Call call) {
                         totalSuccess.incrementAndGet();
-                    }
-                    @Override
-                    public void connectEnd(Call call, InetAddress address, int port) { {
-                        // connection established
-                    }
-                    @Override
-                    public void connectionFailed(Call call, InetAddress address, int port, Response response) { {
-                        totalTimeout.incrementAndGet();
-                        totalFailed.incrementAndGet();
                     }
                 })
                 .build();
@@ -101,7 +97,8 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         WechathlinkWebhookDelivery delivery = new WechathlinkWebhookDelivery();
         delivery.setWechatAccountId(account.getId());
         delivery.setEventId(event.getId());
-        delivery.setDeliveryType(defaultValue(event.getDirection(), "event").toUpperCase() + "_EVENT");
+        delivery.setDeliveryType(
+                (defaultValue(event.getDirection(), "event")).toUpperCase() + "_EVENT");
         delivery.setTargetUrl(normalizedUrl);
         delivery.setRequestBody(requestBody);
         delivery.setResponseBody("");
@@ -118,7 +115,8 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         try {
             retryDeliveryInternal(delivery);
         } catch (Exception ex) {
-            log.error("webhook initial delivery error for deliveryId={}: {}", delivery.getId(), ex.getMessage());
+            log.error("webhook initial delivery error for deliveryId={}: {}",
+                    delivery.getId(), ex.getMessage());
         }
     }
 
@@ -147,10 +145,11 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
     private void retryDeliveryInternal(WechathlinkWebhookDelivery delivery) {
         int attempt = delivery.getAttemptCount() == null ? 0 : delivery.getAttemptCount();
         if (attempt >= MAX_DELIVERY_ATTEMPTS) {
-            markPermanentlyFailed(delivery, "Exceeded max delivery attempts (" + MAX_DELIVERY_ATTEMPTS + ")");
+            markPermanentlyFailed(delivery, "Exceeded max delivery attempts ("
+                    + MAX_DELIVERY_ATTEMPTS + ")");
             return;
         }
-        
+
         String requestBody = delivery.getRequestBody();
         if (!StringUtils.hasText(requestBody)) {
             markDeliveryFailed(delivery, "empty request body");
@@ -161,15 +160,18 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
                 .url(delivery.getTargetUrl())
                 .post(RequestBody.create(requestBody, JSON_MEDIA_TYPE))
                 .header("Content-Type", "application/json; charset=utf-8")
-                .header("X-Wechathlink-TraceId", defaultValue(delivery.getTraceId(), ""))
-                .header("X-Wechathlink-EventId", String.valueOf(delivery.getEventId()))
-                .header("X-Wechathlink-Delivery-Attempt", String.valueOf(attempt + 1))
+                .header("X-Wechathlink-TraceId",
+                        defaultValue(delivery.getTraceId(), ""))
+                .header("X-Wechathlink-EventId",
+                        String.valueOf(delivery.getEventId()))
+                .header("X-Wechathlink-Delivery-Attempt",
+                        String.valueOf(attempt + 1))
                 .build();
 
         try (Response response = httpClient.newCall(request).execute()) {
             ResponseBody body = response.body();
             String responseBody = body != null ? body.string() : "";
-            
+
             if (response.isSuccessful()) {
                 markDeliverySuccess(delivery, response.code(), responseBody);
             } else {
@@ -178,32 +180,37 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         } catch (IOException ex) {
             handleIoError(delivery, ex.getMessage());
         } catch (Exception ex) {
-            markDeliveryFailed(delivery, "delivery error: " + ex.getMessage());
+            markDeliveryFailed(delivery, "delivery error: "
+                    + ex.getMessage());
         }
     }
 
-    private void handleNonSuccessResponse(WechathlinkWebhookDelivery delivery, int code, String responseBody) {
-        String errorMsg = "HTTP " + code + " - " + responseBody.substring(0, Math.min(200, responseBody.length()));
-        
+    private void handleNonSuccessResponse(WechathlinkWebhookDelivery delivery,
+            int code, String responseBody) {
+        String errorMsg = "HTTP " + code + " - "
+                + responseBody.substring(0, Math.min(200, responseBody.length()));
+
         // 客户端错误（4xx 除了 429）不重试
         if (code >= 400 && code < 500 && code != 429) {
             markDeliveryFailed(delivery, errorMsg);
             return;
         }
-        
+
         // 服务器错误或限流 - 安排重试
-        delivery.setAttemptCount((delivery.getAttemptCount() == null ? 0 : delivery.getAttemptCount()) + 1);
+        delivery.setAttemptCount(
+                (delivery.getAttemptCount() == null ? 0 : delivery.getAttemptCount()) + 1);
         delivery.setDeliveryStatus("FAILED");
         delivery.setErrorMessage(errorMsg);
         delivery.setResponseCode(code);
         delivery.setUpdateTime(LocalDateTime.now());
         webhookDeliveryMapper.updateById(delivery);
-        
+
         scheduleRetry(delivery);
     }
 
     private void handleIoError(WechathlinkWebhookDelivery delivery, String errorMsg) {
-        delivery.setAttemptCount((delivery.getAttemptCount() == null ? 0 : delivery.getAttemptCount()) + 1);
+        delivery.setAttemptCount(
+                (delivery.getAttemptCount() == null ? 0 : delivery.getAttemptCount()) + 1);
         delivery.setDeliveryStatus("FAILED");
         delivery.setErrorMessage("connection error: " + errorMsg);
         delivery.setResponseCode(null);
@@ -217,10 +224,10 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         int attempt = delivery.getAttemptCount() == null ? 0 : delivery.getAttemptCount();
         int delayIndex = Math.min(attempt, RETRY_DELAYS_SECONDS.length - 1);
         int delaySeconds = RETRY_DELAYS_SECONDS[delayIndex];
-        
-        log.debug("scheduling webhook retry for deliveryId={} after {}s (attempt {}/{})", 
+
+        log.debug("scheduling webhook retry for deliveryId={} after {}s (attempt {}/{})",
                 delivery.getId(), delaySeconds, attempt + 1, MAX_DELIVERY_ATTEMPTS);
-        
+
         new Thread(() -> {
             try {
                 Thread.sleep(delaySeconds * 1000L);
@@ -232,10 +239,12 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         }, "webhook-retry-" + delivery.getId()).start();
     }
 
-    private void markDeliverySuccess(WechathlinkWebhookDelivery delivery, int code, String responseBody) {
+    private void markDeliverySuccess(WechathlinkWebhookDelivery delivery, int code,
+            String responseBody) {
         delivery.setDeliveryStatus("SUCCESS");
         delivery.setResponseCode(code);
-        delivery.setResponseBody(responseBody.length() > 2000 ? responseBody.substring(0, 2000) : responseBody);
+        delivery.setResponseBody(
+                responseBody.length() > 2000 ? responseBody.substring(0, 2000) : responseBody);
         delivery.setErrorMessage("");
         delivery.setUpdateTime(LocalDateTime.now());
         webhookDeliveryMapper.updateById(delivery);
@@ -252,7 +261,8 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
             delivery.setUpdateTime(LocalDateTime.now());
             webhookDeliveryMapper.updateById(delivery);
             totalFailed.incrementAndGet();
-            log.warn("webhook delivery failed for deliveryId={}, attempt={}, error={}", delivery.getId(), attempt, errorMsg);
+            log.warn("webhook delivery failed for deliveryId={}, attempt={}, error={}",
+                    delivery.getId(), attempt, errorMsg);
         }
     }
 
@@ -261,11 +271,12 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         delivery.setErrorMessage(errorMsg + " [MAX_ATTEMPTS_EXCEEDED]");
         delivery.setUpdateTime(LocalDateTime.now());
         webhookDeliveryMapper.updateById(delivery);
-        log.error("webhook delivery PERMANENTLY FAILED for deliveryId={}, max attempts exceeded: {}", 
+        log.error("webhook delivery PERMANENTLY FAILED for deliveryId={}, max attempts exceeded: {}",
                 delivery.getId(), errorMsg);
     }
 
-    private Map<String, Object> buildPayload(WechathlinkAccount account, WechathlinkEvent event, String traceId) {
+    private Map<String, Object> buildPayload(WechathlinkAccount account,
+            WechathlinkEvent event, String traceId) {
         Map<String, Object> payload = new LinkedHashMap<>();
         Map<String, Object> eventPayload = new LinkedHashMap<>();
         eventPayload.put("id", event.getId());
@@ -317,8 +328,11 @@ public class WechathlinkWebhookServiceImpl extends WechathlinkServiceSupport imp
         long totalSuccessVal = totalSuccess.get();
         long totalFailedVal = totalFailed.get();
         long totalTimeoutVal = totalTimeout.get();
-        double successRate = totalDeliveredVal > 0 ? (double) totalSuccessVal / totalDeliveredVal * 100 : 100.0;
-        return new WechatWebhookStats(totalDeliveredVal, totalSuccessVal, totalFailedVal, totalTimeoutVal, 
+        double successRate = totalDeliveredVal > 0
+                ? (double) totalSuccessVal / totalDeliveredVal * 100
+                : 100.0;
+        return new WechatWebhookStats(totalDeliveredVal, totalSuccessVal, totalFailedVal,
+                totalTimeoutVal,
                 Math.round(successRate * 100.0) / 100.0);
     }
 }
