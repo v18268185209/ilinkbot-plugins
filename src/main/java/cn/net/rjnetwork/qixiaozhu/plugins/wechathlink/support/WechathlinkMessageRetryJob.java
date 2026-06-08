@@ -160,9 +160,6 @@ public class WechathlinkMessageRetryJob {
             }
             log.info("dispatch {} marked for retry (attempt {})", dispatch.getId(), dispatch.getRetryCount());
 
-        } catch (InterruptedException ex) {
-            Thread.currentThread().interrupt();
-            log.warn("auto-retry interrupted for dispatch {}", dispatch.getId());
         } catch (Exception ex) {
             log.warn("auto-retry failed for dispatch {}: {}", dispatch.getId(), ex.getMessage());
             dispatch.setRetryCount((dispatch.getRetryCount() == null ? 0 : dispatch.getRetryCount()) + 1);
