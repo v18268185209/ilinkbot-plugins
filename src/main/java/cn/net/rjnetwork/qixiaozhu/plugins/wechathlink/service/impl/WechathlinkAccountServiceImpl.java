@@ -587,4 +587,87 @@ public class WechathlinkAccountServiceImpl extends WechathlinkServiceSupport imp
         }
         return account;
     }
+
+    @Override
+    public Map<String, Object> batchTogglePoller(java.util.List<Long> ids, boolean start) {
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("ids required");
+        }
+        int successCount = 0;
+        int skipCount = 0;
+        int failCount = 0;
+        java.util.List<Map<String, Object>> results = new java.util.ArrayList<>();
+        
+        for (Long id : ids) {
+            try {
+                WechathlinkAccount account = requireAccount(id);
+                if (account.getStatus() == null || account.getStatus() != 1) {
+                    skipCount++;
+                    results.add(Map.of("accountId", id, "status", "SKIPPED", "reason", "account disabled"));
+                    continue;
+                }
+                if (account.getBotToken() == null || account.getBotToken().isBlank()) {
+                    skipCount++;
+                    results.add(Map.of("accountId", id, "status", "SKIPPED", "reason", "no bot token"));
+                    continue;
+                }
+                if (start && pollerManager.isRunning(id)) {
+                    skipCount++;
+                    results.add(Map.of("accountId", id, "status", "SKIPPED", "reason", "already running"));
+                    continue;
+                }
+                if (!start && !pollerManager.isRunning(id)) {
+                    skipCount++;
+                    results.add(Map.of("accountId", id, "status", "SKIPPED", "reason", "not running"));
+                    continue;
+                }
+                if (start) {
+                    startPoller(id);
+                } else {
+                    stopPoller(id);
+                }
+                successCount++;
+                results.add(Map.of("accountId", id, "status", "OK"));
+            } catch (Exception ex) {
+                failCount++;
+                results.add(Map.of("accountId", id, "status", "FAILED", "error", ex.getMessage()));
+            }
+        }
+        
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", ids.size());
+        result.put("successCount", successCount);
+        result.put("skipCount", skipCount);
+        result.put("failCount", failCount);
+        result.put("results", results);
+        return result;
+    }
+
+    @Override
+    public Map<String, Object> batchHealthCheck(java.util.List<Long> ids) {
+        if (ids == null || ids.isEmpty()) {
+            throw new IllegalArgumentException("ids required");
+        }
+        java.util.List<Map<String, Object>> results = new java.util.ArrayList<>();
+        long healthyCount = 0;
+        
+        for (Long id : ids) {
+            try {
+                Map<String, Object> health = healthCheck(id);
+                boolean healthy = (Boolean) health.remove("healthy");
+                if (healthy) healthyCount++;
+                results.add(health);
+            } catch (Exception ex) {
+                results.add(Map.of("accountId", id, "status", "UNKNOWN", "error", ex.getMessage()));
+            }
+        }
+        
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("total", ids.size());
+        result.put("healthyCount", healthyCount);
+        result.put("unhealthyCount", ids.size() - healthyCount);
+        result.put("healthRate", ids.size() > 0 ? Math.round((double) healthyCount / ids.size() * 10000.0) / 100.0 : 100.0);
+        result.put("results", results);
+        return result;
+    }
 }

@@ -31,4 +31,14 @@ public interface WechathlinkAccountService {
      * 账号健康检查（返回轮询状态、运行时状态、最近错误）
      */
     Map<String, Object> healthCheck(Long id);
+
+    /**
+     * 批量启停账号轮询
+     */
+    Map<String, Object> batchTogglePoller(java.util.List<Long> ids, boolean start);
+
+    /**
+     * 批量健康检查
+     */
+    Map<String, Object> batchHealthCheck(java.util.List<Long> ids);
 }

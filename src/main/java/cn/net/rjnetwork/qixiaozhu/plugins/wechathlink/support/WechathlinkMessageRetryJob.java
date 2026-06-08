@@ -120,7 +120,17 @@ public class WechathlinkMessageRetryJob {
             }
 
             // Rate limit before sending
-            rateLimiter.acquireAndWait(account.getId());
+            try {
+                rateLimiter.acquireAndWait(account.getId());
+            } catch (InterruptedException ex) {
+                Thread.currentThread().interrupt();
+                log.warn("auto-retry interrupted for dispatch {}", dispatch.getId());
+                dispatch.setDispatchStatus("FAILED");
+                dispatch.setErrorMessage("Auto-retry interrupted");
+                dispatch.setUpdateTime(LocalDateTime.now());
+                dispatchMapper.updateById(dispatch);
+                return;
+            }
 
             // Parse the original payload and resend
             String payloadJson = dispatch.getPayloadJson();

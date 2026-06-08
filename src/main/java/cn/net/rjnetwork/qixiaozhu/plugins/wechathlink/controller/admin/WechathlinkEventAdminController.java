@@ -166,4 +166,42 @@ public class WechathlinkEventAdminController extends WechathlinkBaseController {
             throw ex;
         }
     }
+
+    /**
+     * 事件类型分布统计
+     */
+    @GetMapping("/stats/type")
+    @Operation(summary = "Event type distribution stats")
+    @WebLayer(name = "Event type distribution stats", code = "/api/wechathlink/admin/events/stats/type")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> eventTypeStats(@RequestParam(required = false) Long wechatAccountId,
+                                                          @RequestParam(required = false) String dateFrom,
+                                                          @RequestParam(required = false) String dateTo) {
+        return renderSuccess(eventService.eventTypeStats(wechatAccountId, dateFrom, dateTo));
+    }
+
+    /**
+     * 事件趋势统计（按小时）
+     */
+    @GetMapping("/stats/trend")
+    @Operation(summary = "Event trend stats (hourly)")
+    @WebLayer(name = "Event trend stats", code = "/api/wechathlink/admin/events/stats/trend")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> eventTrendStats(@RequestParam(required = false) Long wechatAccountId,
+                                                           @RequestParam(required = false) String dateFrom,
+                                                           @RequestParam(required = false) String dateTo) {
+        return renderSuccess(eventService.eventTrendStats(wechatAccountId, dateFrom, dateTo));
+    }
+
+    /**
+     * 异常事件检测
+     */
+    @GetMapping("/stats/anomalies")
+    @Operation(summary = "Anomaly event detection")
+    @WebLayer(name = "Anomaly event detection", code = "/api/wechathlink/admin/events/stats/anomalies")
+    @ResolveClassLoader
+    public ResultBody<Map<String, Object>> anomalyEvents(@RequestParam(required = false) Long wechatAccountId,
+                                                         @RequestParam(required = false, defaultValue = "20") Integer limit) {
+        return renderSuccess(eventService.anomalyEvents(wechatAccountId, limit));
+    }
 }

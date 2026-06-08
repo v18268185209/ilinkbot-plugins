@@ -1,8 +1,12 @@
 package cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.controller.admin;
 
+import cn.net.rjnetwork.qixiaozhu.annotation.WebLayer;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.controller.base.WechathlinkBaseController;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkAccountService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkDashboardService;
+import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.service.WechathlinkWebhookService;
 import cn.net.rjnetwork.qixiaozhu.plugins.wechathlink.support.poller.WechathlinkPollerManager;
+import cn.net.rjnetwork.qixiaozhu.result.ResultBody;
 import com.zqzqq.bootkits.bootstrap.annotation.ResolveClassLoader;
 import io.swagger.v3.oas.annotations.Operation;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,7 +19,7 @@ import java.util.Map;
 
 /**
  * 插件健康检查控制器
- * 提供插件级和账号级的健康检查端点
+ * 提供插件级、账号级健康检查和 webhook 投递统计
  */
 @RestController
 @RequestMapping("/api/wechathlink/admin/health")
@@ -24,13 +28,16 @@ public class WechathlinkHealthAdminController {
     private final WechathlinkDashboardService dashboardService;
     private final WechathlinkAccountService accountService;
     private final WechathlinkPollerManager pollerManager;
+    private final WechathlinkWebhookService webhookService;
 
     public WechathlinkHealthAdminController(WechathlinkDashboardService dashboardService,
                                             WechathlinkAccountService accountService,
-                                            WechathlinkPollerManager pollerManager) {
+                                            WechathlinkPollerManager pollerManager,
+                                            WechathlinkWebhookService webhookService) {
         this.dashboardService = dashboardService;
         this.accountService = accountService;
         this.pollerManager = pollerManager;
+        this.webhookService = webhookService;
     }
 
     /**
@@ -38,30 +45,51 @@ public class WechathlinkHealthAdminController {
      */
     @GetMapping("/plugin")
     @Operation(summary = "Plugin health check")
+    @WebLayer(name = "Plugin health check", code = "/api/wechathlink/admin/health/plugin")
     @ResolveClassLoader
-    public Map<String, Object> pluginHealth() {
+    public ResultBody<Map<String, Object>> pluginHealth() {
         Map<String, Object> health = new LinkedHashMap<>();
         health.put("component", "ilinkbot-plugin");
-        health.put("status", "UP");
-        health.put("timestamp", System.currentTimeMillis());
 
         // Poller manager health
-        health.put("pollerRunningCount", pollerManager.runningCount());
+        int runningCount = pollerManager.runningCount();
+        health.put("pollerRunningCount", runningCount);
         health.put("pollerHealthy", true);
 
-        // Dashboard summary for overview
+        // Dashboard summary
+        String overallStatus = "UP";
+        String dashboardError = null;
         try {
             Map<String, Object> summary = dashboardService.summary();
             health.put("accountCount", summary.get("accountCount"));
             health.put("enabledAccountCount", summary.get("enabledAccountCount"));
             health.put("errorCount", summary.get("errorCount"));
         } catch (Exception ex) {
-            health.put("status", "DEGRADED");
-            health.put("dashboardError", ex.getMessage());
+            overallStatus = "DEGRADED";
+            dashboardError = ex.getMessage();
         }
 
-        health.put("allComponentsUp", health.get("status").equals("UP") && (Boolean) health.get("pollerHealthy"));
-        return health;
+        // Webhook delivery stats
+        try {
+            WechathlinkWebhookService.WechatWebhookStats ws = webhookService.getStats();
+            health.put("webhookTotalDelivered", ws.totalDelivered());
+            health.put("webhookSuccessRate", ws.successRate());
+            health.put("webhookSuccess", ws.totalSuccess());
+            health.put("webhookFailed", ws.totalFailed());
+            health.put("webhookTimeout", ws.totalTimeout());
+        } catch (Exception ex) {
+            health.put("webhookStatus", "UNKNOWN");
+        }
+
+        health.put("status", overallStatus);
+        health.put("timestamp", System.currentTimeMillis());
+        boolean allHealthy = "UP".equals(overallStatus);
+        health.put("allComponentsUp", allHealthy);
+        
+        if (dashboardError != null) {
+            health.put("dashboardError", dashboardError);
+        }
+        return renderSuccess(health);
     }
 
     /**
@@ -69,8 +97,9 @@ public class WechathlinkHealthAdminController {
      */
     @GetMapping("/account")
     @Operation(summary = "Account health check")
+    @WebLayer(name = "Account health check", code = "/api/wechathlink/admin/health/account")
     @ResolveClassLoader
-    public Map<String, Object> accountHealth(@RequestParam Long accountId) {
+    public ResultBody<Map<String, Object>> accountHealth(@RequestParam Long accountId) {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("component", "ilinkbot-plugin-account");
         try {
@@ -84,6 +113,6 @@ public class WechathlinkHealthAdminController {
             result.put("error", ex.getMessage());
             result.put("timestamp", System.currentTimeMillis());
         }
-        return result;
+        return renderSuccess(result);
     }
 }

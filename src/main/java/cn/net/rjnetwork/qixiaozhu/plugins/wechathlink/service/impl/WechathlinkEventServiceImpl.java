@@ -892,4 +892,145 @@ public class WechathlinkEventServiceImpl implements WechathlinkEventService {
             return StringUtils.hasText(event.getEventType()) ? event.getEventType().trim() : "";
         }
     }
+
+    @Override
+    public Map<String, Object> eventTypeStats(Long wechatAccountId, String dateFrom, String dateTo) {
+        LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
+                .eq(WechathlinkEvent::getIsDeleted, 0)
+                .orderByAsc(WechathlinkEvent::getEventType)
+                .orderByDesc(WechathlinkEvent::getCreateTime);
+        if (wechatAccountId != null) {
+            wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
+        }
+        if (StringUtils.hasText(dateFrom)) {
+            wrapper.ge(WechathlinkEvent::getCreateTime, LocalDateTime.parse(dateFrom));
+        }
+        if (StringUtils.hasText(dateTo)) {
+            wrapper.le(WechathlinkEvent::getCreateTime, LocalDateTime.parse(dateTo));
+        }
+        
+        List<WechathlinkEvent> events = eventMapper.selectList(wrapper);
+        
+        // 按类型统计
+        Map<String, Long> typeCounts = events.stream()
+                .filter(e -> StringUtils.hasText(e.getEventType()))
+                .collect(java.util.stream.Collectors.groupingBy(
+                        e -> e.getEventType().trim(),
+                        java.util.stream.Collectors.counting()
+                ));
+        
+        // 按方向统计
+        Map<String, Long> directionCounts = events.stream()
+                .filter(e -> StringUtils.hasText(e.getDirection()))
+                .collect(java.util.stream.Collectors.groupingBy(
+                        e -> e.getDirection().trim(),
+                        java.util.stream.Collectors.counting()
+                ));
+        
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("totalEvents", (long) events.size());
+        stats.put("byEventType", typeCounts);
+        stats.put("byDirection", directionCounts);
+        stats.put("uniqueEventTypes", typeCounts.size());
+        return stats;
+    }
+
+    @Override
+    public Map<String, Object> eventTrendStats(Long wechatAccountId, String dateFrom, String dateTo) {
+        LocalDateTime start = StringUtils.hasText(dateFrom) ? LocalDateTime.parse(dateFrom) : LocalDateTime.now().minusDays(7).withHour(0).withMinute(0).withSecond(0).withNano(0);
+        LocalDateTime end = StringUtils.hasText(dateTo) ? LocalDateTime.parse(dateTo) : LocalDateTime.now();
+        
+        LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
+                .eq(WechathlinkEvent::getIsDeleted, 0)
+                .ge(WechathlinkEvent::getCreateTime, start)
+                .le(WechathlinkEvent::getCreateTime, end);
+        if (wechatAccountId != null) {
+            wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
+        }
+        
+        List<WechathlinkEvent> events = eventMapper.selectList(wrapper);
+        
+        // 按小时分组
+        Map<String, Long> hourlyCounts = events.stream()
+                .filter(e -> e.getCreateTime() != null)
+                .collect(java.util.stream.Collectors.groupingBy(
+                        e -> e.getCreateTime().toLocalDate().toString() + " " + String.format("%02d", e.getCreateTime().getHour()) + ":00",
+                        java.util.LinkedHashMap::new,
+                        java.util.stream.Collectors.counting()
+                ));
+        
+        // 生成连续小时列表（最近 N 小时）
+        List<Map<String, Object>> trend = new java.util.ArrayList<>();
+        long totalInbound = 0, totalOutbound = 0;
+        for (LocalDateTime hour = start.withMinute(0).withSecond(0).withNano(0); !hour.isAfter(end); hour = hour.plusHours(1)) {
+            String label = hour.toLocalDate().toString() + " " + String.format("%02d:00", hour.getHour());
+            long inbound = hourlyCounts.getOrDefault(label + " inbound", 0L);
+            long outbound = hourlyCounts.getOrDefault(label + " outbound", 0L);
+            totalInbound += inbound;
+            totalOutbound += outbound;
+            trend.add(Map.of(
+                    "hour", label,
+                    "inbound", inbound,
+                    "outbound", outbound,
+                    "total", inbound + outbound
+            ));
+        }
+        
+        Map<String, Object> stats = new LinkedHashMap<>();
+        stats.put("totalInbound", totalInbound);
+        stats.put("totalOutbound", totalOutbound);
+        stats.put("totalEvents", totalInbound + totalOutbound);
+        stats.put("trend", trend);
+        return stats;
+    }
+
+    @Override
+    public Map<String, Object> anomalyEvents(Long wechatAccountId, Integer limit) {
+        if (limit == null || limit <= 0) {
+            limit = 20;
+        }
+        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
+        
+        LambdaQueryWrapper<WechathlinkEvent> wrapper = new LambdaQueryWrapper<WechathlinkEvent>()
+                .eq(WechathlinkEvent::getIsDeleted, 0)
+                .ge(WechathlinkEvent::getCreateTime, oneHourAgo)
+                .orderByDesc(WechathlinkEvent::getCreateTime)
+                .last("LIMIT " + limit);
+        if (wechatAccountId != null) {
+            wrapper.eq(WechathlinkEvent::getWechatAccountId, wechatAccountId);
+        }
+        
+        List<WechathlinkEvent> recentEvents = eventMapper.selectList(wrapper);
+        
+        // 识别异常模式：高频事件类型、无内容的事件
+        java.util.Set<String> anomalyTypes = new java.util.HashSet<>();
+        List<Map<String, Object>> anomalies = new java.util.ArrayList<>();
+        
+        for (WechathlinkEvent event : recentEvents) {
+            String eventType = event.getEventType();
+            if (eventType != null && (eventType.toLowerCase().contains("error") || 
+                                      eventType.toLowerCase().contains("fail") ||
+                                      eventType.toLowerCase().contains("timeout") ||
+                                      eventType.toLowerCase().contains("rejection"))) {
+                anomalyTypes.add(eventType);
+            }
+            if (!StringUtils.hasText(event.getBodyText()) && !StringUtils.hasText(event.getEventType())) {
+                anomalies.add(Map.of(
+                        "eventId", event.getId(),
+                        "eventType", eventType,
+                        "direction", event.getDirection(),
+                        "peerUserId", event.getPeerUserId(),
+                        "createTime", event.getCreateTime(),
+                        "anomaly", "empty-event"
+                ));
+            }
+        }
+        
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("totalRecent", recentEvents.size());
+        result.put("anomalyTypes", new java.util.ArrayList<>(anomalyTypes));
+        result.put("emptyEvents", anomalies.size());
+        result.put("anomalies", anomalies.stream().limit(10).toList());
+        return result;
+    }
 }
